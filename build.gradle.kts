@@ -54,4 +54,7 @@ allOpen {
 
 tasks.withType<Test> {
 	useJUnitPlatform()
+	if (providers.gradleProperty("verifyMysql").isPresent) {
+		systemProperty("teamup.verifyMysql", "true")
+	}
 }

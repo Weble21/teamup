@@ -18,6 +18,23 @@ import org.springframework.web.server.ResponseStatusException
 class TeamAssignmentController(
     private val assignmentService: TeamAssignmentService,
 ) {
+    @PostMapping("/validate")
+    fun validate(
+        @AuthenticationPrincipal principal: OAuth2User?, @PathVariable clubId: Long,
+        @Valid @RequestBody request: ValidateTeamAssignmentRequest,
+    ): TeamAssignmentResponse = assignmentService.validate(userId(principal), clubId, request.memberIds, request.teams)
+
+    @PostMapping("/swap")
+    fun swap(
+        @AuthenticationPrincipal principal: OAuth2User?, @PathVariable clubId: Long,
+        @Valid @RequestBody request: SwapTeamMembersRequest,
+    ): TeamAssignmentResponse = assignmentService.swap(
+        userId(principal), clubId, request.memberIds, request.teams, request.firstMemberId, request.secondMemberId,
+    )
+
+    private fun userId(principal: OAuth2User?): Long = principal?.name?.toLongOrNull()?.takeIf { it > 0 }
+        ?: throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "Authentication required")
+
     @PostMapping
     fun generate(
         @AuthenticationPrincipal principal: OAuth2User?,

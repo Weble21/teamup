@@ -43,6 +43,23 @@ class TeamAssignmentServiceTest {
     }
 
     @Test
+    fun `swap preserves roster and sizes and recomputes summaries from DB`() {
+        val owner = users.save(User("Owner"))
+        val club = clubs.save(Club(owner, "Club", SportType.BASKETBALL))
+        val players = (1..4).map { memberService.create(owner.id!!, club.id!!, "Player $it", "PG", it * 20, null, null) }
+        val ids = players.map { it.id }; val roster = listOf(ids.take(2), ids.drop(2))
+        val result = service.swap(owner.id!!, club.id!!, ids, roster, ids[0], ids[2])
+        assertEquals(listOf(ids[2], ids[1]), result.teams[0].members.map { it.memberId })
+        assertEquals(100, result.teams[0].totalRating)
+        assertEquals("50.00".toBigDecimal(), result.teams[0].averageRating)
+        assertEquals(ids.sorted(), result.teams.flatMap { it.members }.map { it.memberId }.sorted())
+        assertFailsWith<ResponseStatusException> { service.swap(owner.id!!, club.id!!, ids, roster, ids[0], ids[1]) }
+        for (invalid in listOf(listOf(ids, ids), listOf(ids.take(1), ids.drop(2)), listOf(ids.take(3), ids.takeLast(1)))) {
+            assertFailsWith<ResponseStatusException> { service.validate(owner.id!!, club.id!!, ids, invalid) }
+        }
+    }
+
+    @Test
     fun `generates uneven teams with accurate summaries and no member mutations`() {
         val owner = users.save(User("Owner"))
         val club = clubs.save(Club(owner, "Weekend", SportType.BASKETBALL))

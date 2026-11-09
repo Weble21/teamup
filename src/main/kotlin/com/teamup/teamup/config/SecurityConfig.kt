@@ -5,6 +5,7 @@ import com.teamup.teamup.model.auth.SocialOidcUserService
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.context.annotation.Profile
+import org.springframework.beans.factory.annotation.Value
 import org.springframework.http.HttpStatus
 import org.springframework.security.config.annotation.web.builders.HttpSecurity
 import org.springframework.security.web.authentication.HttpStatusEntryPoint
@@ -13,7 +14,9 @@ import org.springframework.security.web.SecurityFilterChain
 
 @Configuration
 @Profile("oauth")
-class SecurityConfig {
+class SecurityConfig(
+    @Value("\${app.frontend-url:http://localhost:3000}") private val frontendUrl: String,
+) {
     @Bean
     fun securityFilterChain(
         http: HttpSecurity,
@@ -46,10 +49,9 @@ class SecurityConfig {
                         .oidcUserService(oidcUserService)
                 }
                 login.successHandler { _, response, _ ->
-                    response.contentType = "application/json"
-                    response.characterEncoding = "UTF-8"
-                    response.writer.write("{\"authenticated\":true}")
+                    response.sendRedirect("$frontendUrl/?signedIn=1")
                 }
+                login.failureHandler { _, response, _ -> response.sendRedirect("$frontendUrl/?loginError=1") }
             }
         return http.build()
     }
