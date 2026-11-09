@@ -1,5 +1,10 @@
-package com.teamup.teamup.user
+package com.teamup.teamup.model.service
 
+import com.teamup.teamup.model.entity.AuthProvider
+import com.teamup.teamup.model.entity.SocialAccount
+import com.teamup.teamup.model.entity.User
+import com.teamup.teamup.model.repository.SocialAccountRepository
+import com.teamup.teamup.model.repository.UserRepository
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 

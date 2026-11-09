@@ -1,6 +1,6 @@
-package com.teamup.teamup.auth
+package com.teamup.teamup.model.auth
 
-import com.teamup.teamup.user.AuthProvider
+import com.teamup.teamup.model.entity.AuthProvider
 import org.junit.jupiter.api.Test
 import org.springframework.security.oauth2.core.OAuth2AuthenticationException
 import kotlin.test.assertEquals

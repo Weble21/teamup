@@ -1,4 +1,4 @@
-package com.teamup.teamup.user
+package com.teamup.teamup.model.entity
 
 import jakarta.persistence.Column
 import jakarta.persistence.Entity

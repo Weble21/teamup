@@ -1,6 +1,6 @@
-package com.teamup.teamup.auth
+package com.teamup.teamup.model.auth
 
-import com.teamup.teamup.user.SocialLoginService
+import com.teamup.teamup.model.service.SocialLoginService
 import org.springframework.context.annotation.Profile
 import org.springframework.security.core.GrantedAuthority
 import org.springframework.security.core.authority.SimpleGrantedAuthority
