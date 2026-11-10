@@ -9,11 +9,22 @@ import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import org.springframework.web.server.ResponseStatusException
 
+data class NewClubMember(val name: String, val position: String, val rating: Int, val age: Int?, val notes: String?)
+
 @Service
 class ClubMemberService(
     private val clubRepository: ClubRepository,
     private val memberRepository: ClubMemberRepository,
 ) {
+    @Transactional
+    fun createBulk(ownerId: Long, clubId: Long, requests: List<NewClubMember>): List<ClubMemberResponse> {
+        val club = clubRepository.findByIdAndOwnerId(clubId, ownerId)
+            ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "Club not found")
+        return requests.map { request ->
+            val member = memberRepository.save(ClubMember(club, request.name, request.position, request.rating, request.age, request.notes))
+            toResponse(member, clubId)
+        }
+    }
     @Transactional(readOnly = true)
     fun validateParticipants(ownerId: Long, clubId: Long, memberIds: List<Long?>): List<ClubMemberResponse> {
         if (clubRepository.findByIdAndOwnerId(clubId, ownerId) == null) {

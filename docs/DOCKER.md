@@ -18,6 +18,8 @@ docker compose logs --tail=100 backend
 
 브라우저에서 <http://localhost:3000>에 접속한다. 프론트엔드는 `/api`, `/oauth2`, `/login/oauth2`를 Docker 네트워크의 백엔드로 전달한다. 소셜 제공자의 redirect URI는 `http://localhost:3000/login/oauth2/code/{provider}`와 일치해야 한다.
 
+회원 명단 사진은 내부 PaddleOCR 컨테이너에서 처리한다. 첫 OCR 요청에 한국어 모델을 내려받으므로 인터넷 연결과 추가 대기 시간이 필요하다. 모델은 `ocr_models` 볼륨에 보관하며 업로드 이미지는 외부 OCR 서비스로 전송하지 않는다. 현재 포트가 PC의 `127.0.0.1`에만 바인딩되어 있어 휴대폰에서 직접 접속할 수 없으며, 모바일 접속에는 별도의 HTTPS 배포 및 OAuth 도메인 설정이 필요하다.
+
 ## 데이터와 종료
 
 Docker MySQL의 데이터는 `mysql_data` 볼륨에 저장된다. 기존 PC의 MySQL과는 별개이므로 기존 데이터는 자동으로 복사되지 않는다. 백엔드는 컨테이너 DB에 Flyway 마이그레이션을 적용한다.

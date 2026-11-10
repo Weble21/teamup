@@ -38,10 +38,20 @@ services:
       dockerfile: Dockerfile.frontend
     environment:
       BACKEND_URL: http://backend:8080
+      OCR_URL: http://ocr:8000
     ports:
       - "127.0.0.1:3000:3000"
     depends_on:
       - backend
+      - ocr
+
+  ocr:
+    build:
+      context: .
+      dockerfile: ocr/Dockerfile
+    volumes:
+      - ocr_models:/root/.paddlex
 
 volumes:
   mysql_data:
+  ocr_models:

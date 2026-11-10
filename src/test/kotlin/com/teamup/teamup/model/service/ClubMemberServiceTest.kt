@@ -54,6 +54,27 @@ class ClubMemberServiceTest {
     }
 
     @Test
+    fun `bulk registration rolls back earlier members when later member is invalid`() {
+        val owner = users.save(User("Owner"))
+        val club = clubs.save(Club(owner, "Weekend", SportType.BASKETBALL))
+        val entries = listOf(NewClubMember("First", "PG", 50, null, null), NewClubMember("Invalid", "C", 101, null, null))
+        assertFailsWith<IllegalArgumentException> { service.createBulk(owner.id!!, club.id!!, entries) }
+        assertEquals(0, members.count())
+    }
+
+    @Test
+    fun `bulk registration rejects another owners club`() {
+        val owner = users.save(User("Owner"))
+        val outsider = users.save(User("Other"))
+        val club = clubs.save(Club(owner, "Weekend", SportType.BASKETBALL))
+        val error = assertFailsWith<ResponseStatusException> {
+            service.createBulk(outsider.id!!, club.id!!, listOf(NewClubMember("Player", "PG", 50, null, null)))
+        }
+        assertEquals(HttpStatus.NOT_FOUND, error.statusCode)
+        assertEquals(0, members.count())
+    }
+
+    @Test
     fun `active filter returns only matching state from requested club`() {
         val owner = users.save(User("Owner"))
         val club = clubs.save(Club(owner, "Weekend", SportType.BASKETBALL))

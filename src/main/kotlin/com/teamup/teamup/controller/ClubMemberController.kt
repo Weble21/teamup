@@ -1,6 +1,7 @@
 package com.teamup.teamup.controller
 
 import com.teamup.teamup.model.service.ClubMemberService
+import com.teamup.teamup.model.service.NewClubMember
 import com.teamup.teamup.view.ClubMemberResponse
 import jakarta.validation.Valid
 import org.springframework.http.HttpStatus
@@ -24,6 +25,16 @@ import java.net.URI
 class ClubMemberController(
     private val memberService: ClubMemberService,
 ) {
+    @PostMapping("/bulk")
+    fun createBulk(
+        @AuthenticationPrincipal principal: OAuth2User?,
+        @PathVariable clubId: Long,
+        @Valid @RequestBody request: CreateClubMembersRequest,
+    ): ResponseEntity<List<ClubMemberResponse>> = ResponseEntity.status(HttpStatus.CREATED)
+        .body(memberService.createBulk(currentUserId(principal), clubId, request.members.map {
+            NewClubMember(it.name, it.position, it.rating, it.age, it.notes)
+        }))
+
     @PostMapping("/validate-participants")
     fun validateParticipants(
         @AuthenticationPrincipal principal: OAuth2User?,

@@ -4,6 +4,7 @@ import com.teamup.teamup.config.SecurityConfig
 import com.teamup.teamup.model.auth.SocialOAuth2UserService
 import com.teamup.teamup.model.auth.SocialOidcUserService
 import com.teamup.teamup.model.service.ClubMemberService
+import com.teamup.teamup.model.service.NewClubMember
 import com.teamup.teamup.view.ClubMemberResponse
 import org.junit.jupiter.api.Test
 import org.mockito.Mockito.`when`
@@ -53,6 +54,33 @@ class ClubMemberControllerTest {
     private fun login() = oauth2Login().oauth2User(DefaultOAuth2User(
         listOf(SimpleGrantedAuthority("ROLE_USER")), mapOf("userId" to "7"), "userId",
     ))
+
+    @Test
+    fun `bulk registration passes authenticated owner and validated members`() {
+        val input = listOf(NewClubMember("Player", "PG", 50, null, null))
+        `when`(service.createBulk(7, 3, input)).thenReturn(listOf(ClubMemberResponse(5, 3, "Player", "PG", 50, null, null, true)))
+        mvc.perform(post("/api/clubs/3/members/bulk").with(login()).with(csrf())
+            .contentType(MediaType.APPLICATION_JSON).content("""{"members":[{"name":"Player","position":"PG","rating":50}]}"""))
+            .andExpect(status().isCreated)
+        verify(service).createBulk(7, 3, input)
+    }
+
+    @Test
+    fun `bulk registration rejects invalid member before service call`() {
+        for (body in listOf("""{"members":[]}""", """{"members":[{"name":" ","position":"PG","rating":50}]}""", """{"members":[{"name":"A","position":"PG","rating":101}]}""")) {
+            mvc.perform(post("/api/clubs/3/members/bulk").with(login()).with(csrf())
+                .contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().isBadRequest)
+        }
+        verifyNoInteractions(service)
+    }
+
+    @Test
+    fun `bulk registration requires csrf`() {
+        mvc.perform(post("/api/clubs/3/members/bulk").with(login()).contentType(MediaType.APPLICATION_JSON)
+            .content("""{"members":[{"name":"A","position":"PG","rating":50}]}"""))
+            .andExpect(status().isForbidden)
+        verifyNoInteractions(service)
+    }
 
     @Test
     fun `member list accepts active and inactive filters`() {

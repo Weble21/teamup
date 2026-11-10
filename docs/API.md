@@ -32,6 +32,7 @@ Entity를 직접 반환하지 않고 JSON DTO를 사용한다. 미인증은 401,
 | GET | `/api/clubs/{clubId}` | 모임 상세 |
 | PUT | `/api/clubs/{clubId}` | 이름·종목 수정 |
 | POST | `/api/clubs/{clubId}/members` | 회원 등록, 201 |
+| POST | `/api/clubs/{clubId}/members/bulk` | 회원 1~100명 일괄 등록, 201 |
 | GET | `/api/clubs/{clubId}/members` | 회원 목록, 최신 ID 순 |
 | PUT | `/api/clubs/{clubId}/members/{memberId}` | 회원 정보 전체 수정 |
 | PATCH | `/api/clubs/{clubId}/members/{memberId}/deactivate` | 비활성화, 반복 요청 가능 |
@@ -62,6 +63,8 @@ Entity를 직접 반환하지 않고 JSON DTO를 사용한다. 미인증은 401,
 ```
 
 이름 1~100자, 포지션 1~50자, 능력치 1~100, 나이 0 이상, 메모 최대 1000자. 나이·메모는 선택이다. PUT에서 선택 항목을 생략하면 기존 값이 삭제된다. 포지션은 현재 자유 입력이다. 비활성화는 삭제가 아니며 회원 정보 수정으로 재활성화되지 않는다.
+
+일괄 등록은 `{ "members": [{"name":"선수","position":"PG","rating":70}] }` 형식이며 전체 항목을 검증하고 하나의 트랜잭션으로 저장한다. 인증·CSRF·모임 소유권 검증은 단일 등록과 같다.
 
 편성 생성:
 

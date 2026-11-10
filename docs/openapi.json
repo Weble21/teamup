@@ -979,6 +979,85 @@
           }
         }
       }
+    },
+    "/api/clubs/{clubId}/members/bulk": {
+      "post": {
+        "summary": "회원 일괄 등록",
+        "description": "1~100명을 하나의 트랜잭션으로 등록합니다.",
+        "parameters": [
+          {
+            "name": "clubId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "X-CSRF-TOKEN",
+            "in": "header",
+            "required": true,
+            "description": "GET /api/auth/csrf에서 받은 token",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "등록한 회원 목록",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Member"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "잘못된 입력"
+          },
+          "401": {
+            "description": "미인증"
+          },
+          "403": {
+            "description": "CSRF 실패"
+          },
+          "404": {
+            "description": "없는 대상 또는 타인 소유"
+          },
+          "409": {
+            "description": "데이터 제약 충돌"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "members"
+                ],
+                "properties": {
+                  "members": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 100,
+                    "items": {
+                      "$ref": "#/components/schemas/MemberInput"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
