@@ -8,3 +8,15 @@
 .import-rows { display: grid; gap: 10px; margin: 16px 0; }
 .import-row { padding: 12px; background: white; border-radius: 12px; }
 .import-row label:not(.check-line) { margin: 8px 0; }
+.social-logins { display: grid; gap: 10px; margin-top: 24px; }
+.social-login { position: relative; display: flex; align-items: center; justify-content: center; width: 100%; min-height: 54px; padding: 0 52px; border: 1px solid transparent; border-radius: 12px; font-size: 14px; font-weight: 700; text-align: center; text-decoration: none; transition: filter .15s ease, transform .15s ease; }
+.social-login:hover { filter: brightness(.96); }
+.social-login:active { transform: scale(.99); }
+.social-login:focus-visible { outline: 3px solid #8bb4ec; outline-offset: 2px; }
+.social-login--kakao { background: #fee500; color: #191919; }
+.social-login--naver { background: #03c75a; color: #fff; }
+.social-login--google { background: #fff; color: #303030; border-color: #d9dee6; }
+.social-icon { position: absolute; left: 19px; display: grid; width: 21px; height: 21px; place-items: center; }
+.social-icon svg { display: block; width: 20px; height: 20px; }
+.social-naver-icon { color: #fff; font-family: Arial, sans-serif; font-size: 20px; font-weight: 900; line-height: 1; }
+.intro .social-logins + .primary { margin-top: 18px; }
