@@ -12,14 +12,17 @@ export async function POST(request) {
     if (!(file instanceof File) || file.size > 8 * 1024 * 1024 || file.size === 0) {
       return Response.json({ error: '8MB 이하 파일을 선택해 주세요.' }, { status: 400 });
     }
+    if (!file.name.toLowerCase().endsWith('.xlsx')) {
+      return Response.json({ error: 'Excel(.xlsx) 파일만 지원합니다.' }, { status: 400 });
+    }
     const forwarded = new FormData();
     forwarded.append('file', file);
-    const response = await fetch(`${process.env.OCR_URL || 'http://localhost:8000'}/extract`, {
-      method: 'POST', body: forwarded, signal: AbortSignal.timeout(180000),
+    const response = await fetch(`${process.env.IMPORTS_URL || 'http://localhost:8000'}/extract`, {
+      method: 'POST', body: forwarded, signal: AbortSignal.timeout(30000),
     });
     const data = await response.json();
     return Response.json(response.ok ? data : { error: data.detail || '파일을 읽지 못했습니다.' }, { status: response.status });
   } catch {
-    return Response.json({ error: '파일 처리 서버에 연결할 수 없습니다. 잠시 후 다시 시도해 주세요.' }, { status: 503 });
+    return Response.json({ error: 'Excel 처리 서버에 연결할 수 없습니다. 잠시 후 다시 시도해 주세요.' }, { status: 503 });
   }
 }

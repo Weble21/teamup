@@ -18,7 +18,7 @@ docker compose logs --tail=100 backend
 
 브라우저에서 <http://localhost:3000>에 접속한다. 프론트엔드는 `/api`, `/oauth2`, `/login/oauth2`를 Docker 네트워크의 백엔드로 전달한다. 소셜 제공자의 redirect URI는 `http://localhost:3000/login/oauth2/code/{provider}`와 일치해야 한다.
 
-회원 명단 사진은 내부 PaddleOCR 컨테이너에서 처리한다. 첫 OCR 요청에 한국어 모델을 내려받으므로 인터넷 연결과 추가 대기 시간이 필요하다. 모델은 `ocr_models` 볼륨에 보관하며 업로드 이미지는 외부 OCR 서비스로 전송하지 않는다. 현재 포트가 PC의 `127.0.0.1`에만 바인딩되어 있어 휴대폰에서 직접 접속할 수 없으며, 모바일 접속에는 별도의 HTTPS 배포 및 OAuth 도메인 설정이 필요하다.
+회원 명단 Excel 파일은 내부 `imports` 컨테이너에서 읽는다. 사진 OCR 기능은 제공하지 않는다. 현재 포트가 PC의 `127.0.0.1`에만 바인딩되어 있어 휴대폰에서 직접 접속할 수 없으며, 모바일 접속에는 별도의 HTTPS 배포 및 OAuth 도메인 설정이 필요하다.
 
 ## 데이터와 종료
 

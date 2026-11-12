@@ -8,6 +8,8 @@
 
 [테스트 fixture](../src/test/kotlin/com/teamup/teamup/model/service/LakersBasketballFixture.kt)는 [NBA 레이커스 공식 명단](https://www.nba.com/team/1610612747/lakers/roster)의 선수 18명과 같은 페이지의 역대 선수 3명(Kobe Bryant, Magic Johnson, Shaquille O'Neal) 이름을 참고했다. **현재 레이커스의 21명 명단이라는 뜻은 아니다.** 포지션 세분화와 능력치는 앱 동작을 확인하기 위한 임의의 테스트 값이며 실제 선수 평가가 아니다.
 
+이전에 만든 [단톡방 참여자 목록 이미지](test-data/kakao-group-lakers-21.png)는 자료로 보관한다. 현재 앱에서는 이미지로 회원을 가져오지 않는다.
+
 ## 편성 결과
 
 `가드, 센터, 포워드를 골고루 나눠줘` 조건으로 14명을 편성했다.
