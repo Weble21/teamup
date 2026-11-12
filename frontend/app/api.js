@@ -10,6 +10,10 @@ export async function api(path, options = {}) {
   const response = await fetch(path, { ...options, headers, credentials: 'same-origin', cache: 'no-store' });
   if (!response.ok) {
     const messages = { 400: '입력값·참석자·팀 구성을 확인해 주세요.', 401: '다시 로그인해 주세요.', 403: '요청을 확인할 수 없습니다. 새로고침 후 다시 시도해 주세요.', 404: '대상을 찾을 수 없거나 접근 권한이 없습니다.', 409: '요청이 충돌했습니다. 목록을 새로 불러와 주세요.' };
+    if (response.status === 400 && path.includes('/team-assignments')) {
+      const problem = await response.json().catch(() => null);
+      if (problem?.detail && /[가-힣]/.test(problem.detail)) throw new Error(problem.detail);
+    }
     throw new Error(messages[response.status] || '서버 요청에 실패했습니다. 잠시 후 다시 시도해 주세요.');
   }
   return response.status === 204 ? null : response.json();

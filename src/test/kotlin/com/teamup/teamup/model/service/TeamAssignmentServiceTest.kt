@@ -8,12 +8,15 @@ import com.teamup.teamup.model.repository.ClubRepository
 import com.teamup.teamup.model.repository.UserRepository
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import org.mockito.ArgumentMatchers.anyList
+import org.mockito.Mockito.`when`
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest
 import org.springframework.context.annotation.Import
 import org.springframework.http.HttpStatus
 import org.springframework.transaction.annotation.Propagation
 import org.springframework.transaction.annotation.Transactional
+import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.web.server.ResponseStatusException
 import java.math.RoundingMode
 import kotlin.test.assertEquals
@@ -26,10 +29,11 @@ import kotlin.test.assertTrue
     "spring.sql.init.mode=always",
     "spring.sql.init.schema-locations=classpath:social-login-schema.sql",
 ])
-@Import(TeamAssignmentService::class, ClubMemberService::class, TeamBalancer::class)
+@Import(TeamAssignmentService::class, ClubMemberService::class, TeamBalancer::class, NaturalConditionService::class)
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
 class TeamAssignmentServiceTest {
     @Autowired lateinit var service: TeamAssignmentService
+    @MockitoBean lateinit var embeddings: EmbeddingConstraintClient
     @Autowired lateinit var memberService: ClubMemberService
     @Autowired lateinit var members: ClubMemberRepository
     @Autowired lateinit var clubs: ClubRepository
@@ -40,6 +44,43 @@ class TeamAssignmentServiceTest {
         members.deleteAllInBatch()
         clubs.deleteAllInBatch()
         users.deleteAllInBatch()
+    }
+
+    @Test
+    fun `lakers inspired test club assigns fourteen of twenty one members into two teams`() {
+        val fixture = LakersBasketballFixture
+        assertEquals(21, fixture.members.size)
+        assertEquals(21, fixture.members.map { it.name }.distinct().size)
+        assertEquals(14, fixture.attendingNames.size)
+
+        val owner = users.save(User("Fixture Owner"))
+        val club = clubs.save(Club(owner, fixture.clubName, fixture.sportType))
+        val created = memberService.createBulk(owner.id!!, club.id!!, fixture.members)
+        val attendeeIds = created.filter { it.name in fixture.attendingNames }.map { it.id }
+        assertEquals(14, attendeeIds.size)
+
+        val result = service.generate(owner.id!!, club.id!!, attendeeIds, fixture.teamCount)
+        assertEquals(club.id, result.clubId)
+        assertEquals(listOf(7, 7), result.teams.map { it.members.size })
+        assertEquals(attendeeIds.sorted(), result.teams.flatMap { it.members }.map { it.memberId }.sorted())
+        assertEquals(result, service.generate(owner.id!!, club.id!!, attendeeIds, fixture.teamCount))
+
+        `when`(embeddings.classify(anyList())).thenReturn(listOf(ClassifiedClause("POSITION_BALANCE", 0.95)))
+        val balanced = service.generate(
+            owner.id!!, club.id!!, attendeeIds, fixture.teamCount,
+            "가드, 센터, 포워드를 골고루 나눠줘",
+        )
+        assertEquals(listOf(7, 7), balanced.teams.map { it.members.size })
+        assertEquals(attendeeIds.sorted(), balanced.teams.flatMap { it.members }.map { it.memberId }.sorted())
+        assertEquals(listOf("포지션 균형"), balanced.interpretedConditions)
+        assertTrue(balanced.teams.all { team -> team.members.any { it.position == "C" } && team.members.any { it.position == "PG" } })
+        assertTrue(kotlin.math.abs(balanced.teams[0].totalRating - balanced.teams[1].totalRating) <= 10)
+        assertEquals(21L, members.count())
+        assertEquals(21, memberService.getMembers(owner.id!!, club.id!!).size)
+
+        balanced.teams.forEach { team ->
+            println("Fixture Team ${team.teamNumber}: ${team.members.joinToString { it.name }} | total=${team.totalRating}")
+        }
     }
 
     @Test

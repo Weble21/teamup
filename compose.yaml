@@ -28,9 +28,12 @@ services:
     environment:
       DB_URL: jdbc:mysql://db:3306/teamup
       SPRING_PROFILES_ACTIVE: oauth
+      CONSTRAINTS_URL: http://constraints:8001
     depends_on:
       db:
         condition: service_healthy
+      constraints:
+        condition: service_started
 
   frontend:
     build:
@@ -51,6 +54,11 @@ services:
       dockerfile: ocr/Dockerfile
     volumes:
       - ocr_models:/root/.paddlex
+
+  constraints:
+    build:
+      context: .
+      dockerfile: constraints/Dockerfile
 
 volumes:
   mysql_data:

@@ -21,6 +21,9 @@ class ClubMember(
     rating: Int,
     age: Int? = null,
     notes: String? = null,
+    @field:ManyToOne(fetch = FetchType.LAZY)
+    @field:JoinColumn(name = "user_id")
+    val user: User? = null,
 ) {
     @field:Id
     @field:GeneratedValue(strategy = GenerationType.IDENTITY)

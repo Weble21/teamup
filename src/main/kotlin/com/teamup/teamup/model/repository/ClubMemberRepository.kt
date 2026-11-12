@@ -12,6 +12,7 @@ interface ClubMemberRepository : JpaRepository<ClubMember, Long> {
     fun findAllByClubIdAndActiveOrderByIdDesc(clubId: Long, active: Boolean): List<ClubMember>
     fun findAllByClubIdAndActiveTrueAndIdIn(clubId: Long, ids: Collection<Long>): List<ClubMember>
     fun findByIdAndClubId(id: Long, clubId: Long): ClubMember?
+    fun findByClubIdAndUserId(clubId: Long, userId: Long): ClubMember?
 }
 
 interface ActiveClubCount {

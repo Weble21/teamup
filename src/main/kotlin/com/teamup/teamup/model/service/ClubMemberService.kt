@@ -3,6 +3,8 @@ package com.teamup.teamup.model.service
 import com.teamup.teamup.model.entity.ClubMember
 import com.teamup.teamup.model.repository.ClubMemberRepository
 import com.teamup.teamup.model.repository.ClubRepository
+import com.teamup.teamup.model.repository.ClubMembershipRepository
+import com.teamup.teamup.model.repository.UserRepository
 import com.teamup.teamup.view.ClubMemberResponse
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
@@ -15,7 +17,25 @@ data class NewClubMember(val name: String, val position: String, val rating: Int
 class ClubMemberService(
     private val clubRepository: ClubRepository,
     private val memberRepository: ClubMemberRepository,
+    private val memberships: ClubMembershipRepository,
+    private val users: UserRepository,
 ) {
+    @Transactional
+    fun saveMyProfile(userId: Long, clubId: Long, input: NewClubMember): ClubMemberResponse {
+        val club = clubRepository.findForUpdate(clubId) ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "Club not found")
+        if (club.owner.id != userId && !memberships.existsByClubIdAndUserId(clubId, userId)) {
+            throw ResponseStatusException(HttpStatus.NOT_FOUND, "Club not found")
+        }
+        val existing = memberRepository.findByClubIdAndUserId(clubId, userId)
+        if (existing != null) {
+            if (!existing.active) throw ResponseStatusException(HttpStatus.CONFLICT, "Member is inactive")
+            existing.updateDetails(input.name, input.position, input.rating, input.age, input.notes)
+            return toResponse(existing, clubId)
+        }
+        val user = users.findById(userId).orElseThrow { ResponseStatusException(HttpStatus.UNAUTHORIZED, "User not found") }
+        val member = memberRepository.save(ClubMember(club, input.name, input.position, input.rating, input.age, input.notes, user))
+        return toResponse(member, clubId)
+    }
     @Transactional
     fun createBulk(ownerId: Long, clubId: Long, requests: List<NewClubMember>): List<ClubMemberResponse> {
         val club = clubRepository.findByIdAndOwnerId(clubId, ownerId)
@@ -75,16 +95,18 @@ class ClubMemberService(
 
     @Transactional(readOnly = true)
     fun getMembers(ownerId: Long, clubId: Long, active: Boolean? = null): List<ClubMemberResponse> {
-        if (clubRepository.findByIdAndOwnerId(clubId, ownerId) == null) {
-            throw ResponseStatusException(HttpStatus.NOT_FOUND, "Club not found")
-        }
+        val isOwner = clubRepository.findByIdAndOwnerId(clubId, ownerId) != null
+        if (!isOwner && !memberships.existsByClubIdAndUserId(clubId, ownerId)) throw ResponseStatusException(HttpStatus.NOT_FOUND, "Club not found")
         val members = if (active == null) {
             memberRepository.findAllByClubIdOrderByIdDesc(clubId)
         } else {
             memberRepository.findAllByClubIdAndActiveOrderByIdDesc(clubId, active)
         }
         return members.map { member ->
-            toResponse(member, clubId)
+            val own = member.user?.id == ownerId
+            toResponse(member, clubId).let { response ->
+                response.copy(mine = own, age = if (isOwner || own) response.age else null, notes = if (isOwner || own) response.notes else null)
+            }
         }
     }
 

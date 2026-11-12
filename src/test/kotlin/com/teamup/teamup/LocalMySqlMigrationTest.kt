@@ -28,10 +28,12 @@ class LocalMySqlMigrationTest {
         assertTrue(flyway.validateWithResult().validationSuccessful)
         DriverManager.getConnection(url, username, password).use { connection ->
             connection.createStatement().use { statement ->
-                statement.executeQuery("SELECT COUNT(*) FROM flyway_schema_history WHERE success = 1 AND version = '5'").use { result ->
+                statement.executeQuery("SELECT COUNT(*) FROM flyway_schema_history WHERE success = 1 AND version = '7'").use { result ->
                     result.next(); assertEquals(1, result.getInt(1))
                 }
                 statement.executeQuery("SELECT COUNT(*) FROM matches").use { result -> assertTrue(result.next()) }
+                statement.executeQuery("SELECT COUNT(*) FROM club_invitations").use { result -> assertTrue(result.next()) }
+                statement.executeQuery("SELECT COUNT(*) FROM user_sport_profiles").use { result -> assertTrue(result.next()) }
             }
         }
     }

@@ -23,15 +23,17 @@ import kotlin.test.*
     "spring.sql.init.mode=always", "spring.sql.init.schema-locations=classpath:social-login-schema.sql",
     "spring.jpa.properties.hibernate.generate_statistics=true",
 ])
-@Import(MatchService::class, ClubMemberService::class, TeamAssignmentService::class, TeamBalancer::class, ClubService::class)
+@Import(MatchService::class, ClubMemberService::class, TeamAssignmentService::class, TeamBalancer::class, ClubService::class, NaturalConditionService::class)
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
 class MatchServiceTest {
     @Autowired lateinit var service: MatchService
+    @org.springframework.test.context.bean.override.mockito.MockitoBean lateinit var embeddings: EmbeddingConstraintClient
     @Autowired lateinit var memberService: ClubMemberService
     @Autowired lateinit var clubService: ClubService
     @Autowired lateinit var users: UserRepository
     @Autowired lateinit var clubs: ClubRepository
     @Autowired lateinit var members: ClubMemberRepository
+    @Autowired lateinit var memberships: ClubMembershipRepository
     @Autowired lateinit var matches: MatchRepository
     @Autowired lateinit var teams: MatchTeamRepository
     @Autowired lateinit var participants: MatchTeamMemberRepository
@@ -54,6 +56,19 @@ class MatchServiceTest {
 
     private fun confirm(requestId: UUID = UUID.randomUUID()) =
         service.confirm(ownerId, clubId, requestId, ids, roster, Instant.parse("2026-11-09T01:00:00Z"), "Game")
+
+    @Test
+    fun `invited member may read matches but cannot confirm them`() {
+        val user = users.save(User("Member"))
+        val saved = confirm()
+        memberships.save(ClubMembership(clubs.findById(clubId).orElseThrow(), user))
+        try {
+            assertEquals(saved.id, service.list(user.id!!, clubId, 0, 20).matches.single().id)
+            assertEquals(saved, service.detail(user.id!!, clubId, saved.id))
+            val error = assertFailsWith<ResponseStatusException> { service.confirm(user.id!!, clubId, UUID.randomUUID(), ids, roster, null, null) }
+            assertEquals(HttpStatus.NOT_FOUND, error.statusCode)
+        } finally { memberships.deleteAllInBatch() }
+    }
 
     @Test
     fun `server generated match timestamp is stable after database round trip`() {

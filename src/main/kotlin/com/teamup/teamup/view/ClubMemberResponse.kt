@@ -9,4 +9,5 @@ data class ClubMemberResponse(
     val age: Int?,
     val notes: String?,
     val active: Boolean,
+    val mine: Boolean = false,
 )

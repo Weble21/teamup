@@ -25,6 +25,16 @@ import java.net.URI
 class ClubMemberController(
     private val memberService: ClubMemberService,
 ) {
+    @PutMapping("/me")
+    fun saveMyProfile(
+        @AuthenticationPrincipal principal: OAuth2User?,
+        @PathVariable clubId: Long,
+        @Valid @RequestBody request: UpdateClubMemberRequest,
+    ): ClubMemberResponse = memberService.saveMyProfile(
+        currentUserId(principal), clubId,
+        NewClubMember(request.name, request.position, request.rating, request.age, request.notes),
+    )
+
     @PostMapping("/bulk")
     fun createBulk(
         @AuthenticationPrincipal principal: OAuth2User?,

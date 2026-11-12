@@ -5,6 +5,7 @@ import com.teamup.teamup.model.entity.SportType
 import com.teamup.teamup.model.repository.ClubRepository
 import com.teamup.teamup.model.repository.ClubMemberRepository
 import com.teamup.teamup.model.repository.UserRepository
+import com.teamup.teamup.model.repository.ClubMembershipRepository
 import com.teamup.teamup.view.ClubResponse
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
@@ -16,6 +17,7 @@ class ClubService(
     private val clubRepository: ClubRepository,
     private val userRepository: UserRepository,
     private val memberRepository: ClubMemberRepository,
+    private val memberships: ClubMembershipRepository,
 ) {
     @Transactional
     fun update(ownerId: Long, clubId: Long, name: String, sportType: SportType): ClubResponse {
@@ -27,9 +29,10 @@ class ClubService(
 
     @Transactional(readOnly = true)
     fun getMyClub(ownerId: Long, clubId: Long): ClubResponse {
-        val club = clubRepository.findByIdAndOwnerId(clubId, ownerId)
+        val club = clubRepository.findById(clubId).orElse(null)
             ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "Club not found")
-        return ClubResponse(checkNotNull(club.id), club.name, club.sportType, ownerId, memberRepository.countByClubIdAndActiveTrue(clubId))
+        if (club.owner.id != ownerId && !memberships.existsByClubIdAndUserId(clubId, ownerId)) throw ResponseStatusException(HttpStatus.NOT_FOUND, "Club not found")
+        return ClubResponse(checkNotNull(club.id), club.name, club.sportType, checkNotNull(club.owner.id), memberRepository.countByClubIdAndActiveTrue(clubId))
     }
 
     @Transactional(readOnly = true)
@@ -37,11 +40,11 @@ class ClubService(
         if (!userRepository.existsById(ownerId)) {
             throw ResponseStatusException(HttpStatus.NOT_FOUND, "User not found")
         }
-        val clubs = clubRepository.findAllByOwnerIdOrderByIdDesc(ownerId)
+        val clubs = clubRepository.findVisibleForUser(ownerId)
         if (clubs.isEmpty()) return emptyList()
         val counts = memberRepository.countActiveByClubs(clubs.map { checkNotNull(it.id) }).associate { it.clubId to it.memberCount }
         return clubs.map { club ->
-            ClubResponse(checkNotNull(club.id), club.name, club.sportType, ownerId, counts[club.id] ?: 0)
+            ClubResponse(checkNotNull(club.id), club.name, club.sportType, checkNotNull(club.owner.id), counts[club.id] ?: 0)
         }
     }
 

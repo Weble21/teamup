@@ -22,9 +22,16 @@ class MatchService(
     private val teams: MatchTeamRepository,
     private val participants: MatchTeamMemberRepository,
     private val assignmentService: TeamAssignmentService,
+    private val memberships: ClubMembershipRepository,
 ) {
     private fun ownedClub(ownerId: Long, clubId: Long): Club = clubs.findByIdAndOwnerId(clubId, ownerId)
         ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "Club not found")
+
+    private fun requireVisibleClub(userId: Long, clubId: Long) {
+        if (clubs.findByIdAndOwnerId(clubId, userId) == null && !memberships.existsByClubIdAndUserId(clubId, userId)) {
+            throw ResponseStatusException(HttpStatus.NOT_FOUND, "Club not found")
+        }
+    }
 
     @Transactional
     fun confirm(ownerId: Long, clubId: Long, requestId: UUID, memberIds: List<Long?>, roster: List<List<Long?>?>, playedAt: Instant?, memo: String?): MatchResponse {
@@ -46,7 +53,7 @@ class MatchService(
 
     @Transactional(readOnly = true)
     fun detail(ownerId: Long, clubId: Long, matchId: Long): MatchResponse {
-        ownedClub(ownerId, clubId)
+        requireVisibleClub(ownerId, clubId)
         val match = matches.findByIdAndClubId(matchId, clubId)
             ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "Match not found")
         return response(match, clubId)
@@ -54,7 +61,7 @@ class MatchService(
 
     @Transactional(readOnly = true)
     fun list(ownerId: Long, clubId: Long, page: Int, size: Int): MatchPageResponse {
-        ownedClub(ownerId, clubId)
+        requireVisibleClub(ownerId, clubId)
         if (page !in 0..100000 || size !in 1..100) throw ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid pagination")
         val slice = matches.findAllByClubIdOrderByPlayedAtDescIdDesc(clubId, PageRequest.of(page, size))
         return MatchPageResponse(slice.content.map { MatchSummaryResponse(checkNotNull(it.id), it.sportSnapshot, it.playedAt, it.memo) }, page, slice.hasNext())

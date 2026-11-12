@@ -13,6 +13,7 @@ import java.math.RoundingMode
 class TeamAssignmentService(
     private val memberService: ClubMemberService,
     private val teamBalancer: TeamBalancer,
+    private val naturalConditions: NaturalConditionService,
 ) {
     @Transactional(readOnly = true)
     fun validate(ownerId: Long, clubId: Long, memberIds: List<Long?>, teams: List<List<Long?>?>): TeamAssignmentResponse {
@@ -32,7 +33,7 @@ class TeamAssignmentService(
     }
 
     @Transactional(readOnly = true)
-    fun swap(ownerId: Long, clubId: Long, memberIds: List<Long?>, teams: List<List<Long?>?>, firstId: Long, secondId: Long): TeamAssignmentResponse {
+    fun swap(ownerId: Long, clubId: Long, memberIds: List<Long?>, teams: List<List<Long?>?>, firstId: Long, secondId: Long, conditionText: String? = null): TeamAssignmentResponse {
         validate(ownerId, clubId, memberIds, teams)
         val firstTeam = teams.indexOfFirst { it!!.contains(firstId) }
         val secondTeam = teams.indexOfFirst { it!!.contains(secondId) }
@@ -44,17 +45,27 @@ class TeamAssignmentService(
             secondId -> firstId
             else -> id
         } } }
-        return validate(ownerId, clubId, memberIds, swapped)
+        val result = validate(ownerId, clubId, memberIds, swapped)
+        val conditions = naturalConditions.interpret(conditionText, result.teams.flatMap { it.members })
+        val teamByMember = result.teams.flatMap { team -> team.members.map { it.memberId to team.teamNumber } }.toMap()
+        if (conditions.together.any { (a, b) -> teamByMember[a] != teamByMember[b] } ||
+            conditions.apart.any { (a, b) -> teamByMember[a] == teamByMember[b] }) {
+            throw ResponseStatusException(HttpStatus.BAD_REQUEST, "Swap violates team conditions")
+        }
+        return result.copy(interpretedConditions = conditions.descriptions)
     }
 
     @Transactional(readOnly = true)
-    fun generate(ownerId: Long, clubId: Long, memberIds: List<Long?>, teamCount: Int): TeamAssignmentResponse {
+    fun generate(ownerId: Long, clubId: Long, memberIds: List<Long?>, teamCount: Int, conditionText: String? = null): TeamAssignmentResponse {
         val members = memberService.validateParticipants(ownerId, clubId, memberIds)
         if (teamCount < 2 || teamCount > members.size) {
             throw ResponseStatusException(HttpStatus.BAD_REQUEST, "Team count must be between 2 and the participant count")
         }
         val participants = members.map { TeamParticipant(it.id, it.name, it.position, it.rating) }
-        return summarize(clubId, teamBalancer.balance(participants, teamCount))
+        val conditions = naturalConditions.interpret(conditionText, participants)
+        val result = try { teamBalancer.balance(participants, teamCount, conditions) }
+            catch (e: IllegalArgumentException) { throw ResponseStatusException(HttpStatus.BAD_REQUEST, "Team conditions cannot be satisfied", e) }
+        return summarize(clubId, result).copy(interpretedConditions = conditions.descriptions)
     }
 
     private fun summarize(clubId: Long, assignment: List<List<TeamParticipant>>): TeamAssignmentResponse {

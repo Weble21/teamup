@@ -6,6 +6,7 @@ import java.math.BigDecimal
 data class TeamAssignmentResponse(
     val clubId: Long,
     val teams: List<AssignedTeamResponse>,
+    val interpretedConditions: List<String> = emptyList(),
 )
 
 data class AssignedTeamResponse(
