@@ -5,6 +5,7 @@ import com.teamup.teamup.model.team.TeamParticipant
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.web.server.ResponseStatusException
+import java.util.Locale
 
 @Service
 class NaturalConditionService(private val embeddings: EmbeddingConstraintClient) {
@@ -34,7 +35,7 @@ class NaturalConditionService(private val embeddings: EmbeddingConstraintClient)
             val positive = Regex("같은 팀|함께|같이|한 팀|묶|붙여").containsMatchIn(masked[index]) && !negatedTogether
             when (type) {
                 "PAIR_RELATION" -> {
-                    if (playersInClause.size != 2) invalid("같은 팀·다른 팀 조건에는 선택한 참석자 2명의 등록 이름을 입력해 주세요. 성을 생략한 한글 이름은 한 명으로 특정될 때만 사용할 수 있습니다. 별명이나 번역한 이름은 인식하지 못합니다.")
+                    if (playersInClause.size != 2) invalid("같은 팀·다른 팀 조건에는 선택한 참석자 2명의 등록 이름을 입력해 주세요. 한글 성 생략이나 영문 이름·성만 입력하는 경우 한 명으로 특정되어야 합니다. 별명이나 번역한 이름은 인식하지 못합니다.")
                     if (negatedApart || (negative && positive)) invalid("조건의 방향이 모호합니다. 같은 팀 또는 다른 팀 중 하나만 명시해 주세요.")
                     if (!negative && !positive) invalid("같은 팀인지 다른 팀인지 명시해 주세요.")
                     val pair = playersInClause.map { it.memberId }.sorted().let { it[0] to it[1] }
@@ -58,10 +59,21 @@ class NaturalConditionService(private val embeddings: EmbeddingConstraintClient)
     private data class NamedClause(val players: List<TeamParticipant>, val masked: String)
 
     private fun resolveNames(clauses: List<String>, players: List<TeamParticipant>): List<NamedClause> {
-        val fullNames = players.filter { it.name.isNotBlank() }.groupBy { it.name.trim() }
-        // Only infer omission of one Hangul surname character; never translate or guess nicknames.
-        val shortNames = players.filter { Regex("[가-힣]{3,4}").matches(it.name.trim()) }
-            .groupBy { it.name.trim().drop(1) }
+        fun key(name: String) = name.trim().lowercase(Locale.ROOT)
+        val fullNames = players.filter { it.name.isNotBlank() }.groupBy { key(it.name) }
+        val hangulName = Regex("[가-힣]{3,4}")
+        val latinWord = Regex("[\\p{IsLatin}\\p{M}]+(?:['’.-][\\p{IsLatin}\\p{M}]+)*")
+        val shortNames = players.flatMap { player ->
+            val name = player.name.trim()
+            val words = name.split(Regex("\\s+"))
+            // Match complete given-name/surname words, never arbitrary fragments or translations.
+            val aliases = when {
+                hangulName.matches(name) -> listOf(name.drop(1))
+                words.size >= 2 && words.all { latinWord.matches(it) } -> listOf(words.first(), words.last())
+                else -> emptyList()
+            }
+            aliases.filter { it.length >= 2 }.map { key(it) }.distinct().map { it to player }
+        }.groupBy({ it.first }, { it.second })
         fun alternatives(names: Set<String>) = names.sortedByDescending { it.length }.joinToString("|") { Regex.escape(it) }
         if (fullNames.isEmpty()) return clauses.map { NamedClause(emptyList(), it) }
         val boundary = "[^\\p{L}\\p{N}_]"
@@ -69,13 +81,13 @@ class NaturalConditionService(private val embeddings: EmbeddingConstraintClient)
         val shortPattern = if (shortNames.isEmpty()) "" else
             "|(?<![\\p{L}\\p{N}_])(?:${alternatives(shortNames.keys)})(?=$|$boundary|(?:$particles)(?=$|$boundary))"
         // Preserve full-name matching, including text without spaces; bound inferred short names to words.
-        val pattern = Regex("(?:${alternatives(fullNames.keys)})$shortPattern")
+        val pattern = Regex("(?:${alternatives(fullNames.keys)})$shortPattern", RegexOption.IGNORE_CASE)
         return clauses.map { clause ->
             val found = linkedMapOf<Long, TeamParticipant>()
             val masked = pattern.replace(clause) { match ->
                 // A registered full name takes precedence over another player's shortened name.
-                val candidates = fullNames[match.value] ?: shortNames.getValue(match.value)
-                if (candidates.size != 1) invalid("'${match.value}'에 해당하는 참석자가 여러 명입니다. 성을 포함한 전체 이름을 입력해 주세요.")
+                val candidates = fullNames[key(match.value)] ?: shortNames.getValue(key(match.value))
+                if (candidates.size != 1) invalid("'${match.value}'에 해당하는 참석자가 여러 명입니다. 등록된 전체 이름을 입력해 주세요.")
                 val player = candidates.single()
                 found[player.memberId] = player
                 "선수"

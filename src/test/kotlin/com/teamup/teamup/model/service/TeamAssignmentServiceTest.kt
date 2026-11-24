@@ -66,6 +66,11 @@ class TeamAssignmentServiceTest {
         assertEquals(listOf(11, 10), result.teams.map { it.members.size })
         assertEquals(created.map { it.id }.sorted(), result.teams.flatMap { it.members }.map { it.memberId }.sorted())
         assertTrue(result.teams.any { team -> team.members.map { it.name }.containsAll(listOf("Kobe Bryant", "Shaquille O'Neal")) })
+
+        val bySurname = service.generate(owner.id!!, club.id!!, created.map { it.id }, 2, "Hardy와 Vanderbilt는 같은 팀")
+        assertEquals(listOf(11, 10), bySurname.teams.map { it.members.size })
+        assertEquals(created.map { it.id }.sorted(), bySurname.teams.flatMap { it.members }.map { it.memberId }.sorted())
+        assertTrue(bySurname.teams.any { team -> team.members.map { it.name }.containsAll(listOf("Jaden Hardy", "Jarred Vanderbilt")) })
     }
 
     @Test

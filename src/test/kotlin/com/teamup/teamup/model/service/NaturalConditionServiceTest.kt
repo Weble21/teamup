@@ -26,6 +26,56 @@ class NaturalConditionServiceTest {
         TeamParticipant(12, "이현중", "SF", 70),
     )
 
+    private val englishPlayers = listOf(
+        TeamParticipant(21, "Jaden Hardy", "SG", 60),
+        TeamParticipant(22, "Jarred Vanderbilt", "PF", 70),
+    )
+
+    @Test
+    fun `English surname words in the reported sentence resolve and are masked`() {
+        `when`(embeddings.classify(anyList())).thenReturn(listOf(ClassifiedClause("PAIR_RELATION", 0.9)))
+        val result = service.interpret("Hardy와 Vanderbilt는 같은 팀", englishPlayers)
+        assertEquals(listOf(21L to 22L), result.together)
+        assertEquals(listOf("Jaden Hardy·Jarred Vanderbilt 같은 팀"), result.descriptions)
+        verify(embeddings).classify(listOf("선수와 선수는 같은 팀"))
+    }
+
+    @Test
+    fun `English given names surnames and full names ignore casing`() {
+        `when`(embeddings.classify(anyList())).thenReturn(listOf(ClassifiedClause("PAIR_RELATION", 0.9)))
+        for (clause in listOf("hardy와 VANDERBILT는 다른 팀", "Jaden과 Jarred는 다른 팀", "jaden hardy와 JARRED VANDERBILT는 다른 팀")) {
+            assertEquals(listOf(21L to 22L), service.interpret(clause, englishPlayers).apart)
+        }
+    }
+
+    @Test
+    fun `shared English surname requires full names and only attending players participate`() {
+        val attending = englishPlayers + TeamParticipant(23, "Other Hardy", "C", 60)
+        val failure = assertFailsWith<ResponseStatusException> { service.interpret("Hardy와 Vanderbilt는 같은 팀", attending) }
+        assertTrue(failure.reason!!.contains("전체 이름"))
+        verifyNoInteractions(embeddings)
+        `when`(embeddings.classify(anyList())).thenReturn(listOf(ClassifiedClause("PAIR_RELATION", 0.9)))
+        assertEquals(listOf(21L to 22L), service.interpret("Jaden Hardy와 Vanderbilt는 같은 팀", attending).together)
+        assertEquals(listOf(21L to 22L), service.interpret("Hardy와 Vanderbilt는 같은 팀", englishPlayers).together)
+    }
+
+    @Test
+    fun `partial words and unselected English members are not guessed`() {
+        `when`(embeddings.classify(anyList())).thenReturn(listOf(ClassifiedClause("PAIR_RELATION", 0.9)))
+        for (clause in listOf("Hard와 Vanderbilt는 같은 팀", "Hardyman과 Vanderbilt는 같은 팀", "SomeHardy와 Vanderbilt는 같은 팀")) {
+            assertFailsWith<ResponseStatusException> { service.interpret(clause, englishPlayers) }
+        }
+        assertFailsWith<ResponseStatusException> { service.interpret("Hardy와 Vanderbilt는 같은 팀", englishPlayers.take(1)) }
+    }
+
+    @Test
+    fun `Latin names preserve apostrophes and accents in surname matching`() {
+        `when`(embeddings.classify(anyList())).thenReturn(listOf(ClassifiedClause("PAIR_RELATION", 0.9)))
+        val attending = listOf(TeamParticipant(31, "Shaquille O'Neal", "C", 100), TeamParticipant(32, "Luka Dončić", "PG", 100))
+        assertEquals(listOf(31L to 32L), service.interpret("O'Neal과 Dončić는 같은 팀", attending).together)
+        verify(embeddings).classify(listOf("선수과 선수는 같은 팀"))
+    }
+
     @Test
     fun `unique Korean given names resolve to attending members and are masked`() {
         `when`(embeddings.classify(anyList())).thenReturn(listOf(ClassifiedClause("PAIR_RELATION", 0.9)))
