@@ -4,10 +4,13 @@ import com.teamup.teamup.model.team.TeamParticipant
 import org.junit.jupiter.api.Test
 import org.mockito.Mockito.mock
 import org.mockito.Mockito.`when`
+import org.mockito.Mockito.verify
+import org.mockito.Mockito.verifyNoInteractions
 import org.mockito.ArgumentMatchers.anyList
 import org.springframework.web.server.ResponseStatusException
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertTrue
 
 class NaturalConditionServiceTest {
     private val embeddings = mock(EmbeddingConstraintClient::class.java)
@@ -17,6 +20,64 @@ class NaturalConditionServiceTest {
         TeamParticipant(2, "철수", "DF", 70),
         TeamParticipant(3, "영희", "FW", 60),
     )
+
+    private val koreanPlayers = listOf(
+        TeamParticipant(11, "이정현", "PG", 80),
+        TeamParticipant(12, "이현중", "SF", 70),
+    )
+
+    @Test
+    fun `unique Korean given names resolve to attending members and are masked`() {
+        `when`(embeddings.classify(anyList())).thenReturn(listOf(ClassifiedClause("PAIR_RELATION", 0.9)))
+        val result = service.interpret("현중과 정현은 다른 팀", koreanPlayers)
+        assertEquals(listOf(11L to 12L), result.apart)
+        assertEquals(listOf("이정현·이현중 다른 팀"), result.descriptions)
+        verify(embeddings).classify(listOf("선수과 선수은 다른 팀"))
+    }
+
+    @Test
+    fun `ambiguous given names require full names before classification`() {
+        val attending = koreanPlayers + TeamParticipant(13, "김정현", "C", 60)
+        val failure = assertFailsWith<ResponseStatusException> { service.interpret("현중과 정현은 다른 팀", attending) }
+        assertTrue(failure.reason!!.contains("전체 이름"))
+        verifyNoInteractions(embeddings)
+    }
+
+    @Test
+    fun `full names disambiguate identical given names without matching embedded aliases`() {
+        `when`(embeddings.classify(anyList())).thenReturn(listOf(ClassifiedClause("PAIR_RELATION", 0.9)))
+        val attending = koreanPlayers + TeamParticipant(13, "김정현", "C", 60)
+        val result = service.interpret("이정현과 이현중은 같은 팀", attending)
+        assertEquals(listOf(11L to 12L), result.together)
+        verify(embeddings).classify(listOf("선수과 선수은 같은 팀"))
+        assertEquals(listOf(11L to 12L), service.interpret("이정현과이현중은 같은 팀", attending).together)
+    }
+
+    @Test
+    fun `only selected participants determine whether a short name is unique`() {
+        `when`(embeddings.classify(anyList())).thenReturn(listOf(ClassifiedClause("PAIR_RELATION", 0.9)))
+        val result = service.interpret("이현중과 정현은 같은 팀", koreanPlayers)
+        assertEquals(listOf(11L to 12L), result.together)
+        assertFailsWith<ResponseStatusException> { service.interpret("현중과 김정현은 같은 팀", koreanPlayers) }
+        assertFailsWith<ResponseStatusException> { service.interpret("현중과 정현수는 같은 팀", koreanPlayers) }
+    }
+
+    @Test
+    fun `repeated names and particles resolve each member once`() {
+        `when`(embeddings.classify(anyList())).thenReturn(listOf(ClassifiedClause("PAIR_RELATION", 0.9)))
+        val result = service.interpret("정현이랑 이현중은 같은 팀, 이정현도 포함", koreanPlayers)
+        assertEquals(listOf(11L to 12L), result.together)
+        verify(embeddings).classify(listOf("선수이랑 선수은 같은 팀, 선수도 포함"))
+    }
+
+    @Test
+    fun `registered full name has precedence and duplicate full names are rejected`() {
+        `when`(embeddings.classify(anyList())).thenReturn(listOf(ClassifiedClause("PAIR_RELATION", 0.9)))
+        val attending = koreanPlayers + TeamParticipant(13, "정현", "C", 60)
+        assertEquals(listOf(12L to 13L), service.interpret("정현과 이현중은 같은 팀", attending).together)
+        val duplicate = koreanPlayers + TeamParticipant(14, "이정현", "C", 60)
+        assertFailsWith<ResponseStatusException> { service.interpret("이정현과 이현중은 같은 팀", duplicate) }
+    }
 
     @Test
     fun `interprets pair polarity and position balance`() {

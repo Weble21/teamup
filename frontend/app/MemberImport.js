@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { isLol, lolTiers } from './ratings.mjs';
 import { buildImportRows, detectImportColumns, importMemberPayload } from './memberImport.mjs';
 
@@ -11,19 +11,46 @@ export default function MemberImport({ onClose, onSave, busy, saveError, sportTy
   const [skipHeader, setSkipHeader] = useState(true);
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const readRequest = useRef(null);
+  const saveRequest = useRef(false);
+
+  useEffect(() => () => {
+    const request = readRequest.current; readRequest.current = null; request?.abort();
+  }, []);
+
+  function close() { if (!saveRequest.current) onClose(); }
+  function chooseFile(event) {
+    readRequest.current?.abort(); readRequest.current = null;
+    setLoading(false); setFile(event.target.files?.[0] || null);
+    setResult(null); setRows([]); setError('');
+  }
 
   async function extract() {
-    if (!file || !file.name.toLowerCase().endswith('.xlsx')) return setError('Excel(.xlsx) 파일을 선택해 주세요.');
+    if (!file || !file.name.toLowerCase().endsWith('.xlsx')) return setError('Excel(.xlsx) 파일을 선택해 주세요.');
+    readRequest.current?.abort();
+    const controller = new AbortController();
+    readRequest.current = controller;
+    let timedOut = false;
+    const timeout = setTimeout(() => { timedOut = true; controller.abort(); }, 35000);
     setLoading(true); setError(''); setResult(null); setRows([]);
     try {
       const form = new FormData(); form.append('file', file);
-      const response = await fetch('/member-import', { method: 'POST', body: form });
+      const response = await fetch('/member-import', { method: 'POST', body: form, signal: controller.signal });
       const data = await response.json();
+      if (readRequest.current !== controller) return;
       if (!response.ok) throw new Error(data.error);
       setResult(data); setMapping(detectImportColumns(data.rows)); setSkipHeader(true);
-    } catch (e) { setError(e.message || '파일을 처리하지 못했습니다.'); }
-    finally { setLoading(false); }
+    } catch (e) {
+      if (readRequest.current === controller) {
+        if (timedOut) setError('파일 읽기 시간이 초과되었습니다. 다시 시도해 주세요.');
+        else if (e.name !== 'AbortError') setError(e.message || '파일을 처리하지 못했습니다.');
+      }
+    } finally {
+      clearTimeout(timeout);
+      if (readRequest.current === controller) { readRequest.current = null; setLoading(false); }
+    }
   }
   function changeMapping(field, value) {
     setMapping(old => ({ ...old, [field]: value })); setRows([]); setError('');
@@ -35,11 +62,16 @@ export default function MemberImport({ onClose, onSave, busy, saveError, sportTy
   function changeRow(index, changes) {
     setRows(old => old.map((row, i) => i === index ? { ...row, ...changes } : row));
   }
-  function submit() {
+  async function submit() {
+    if (saveRequest.current) return;
+    if (busy) return setError('다른 작업을 처리 중입니다. 잠시 후 등록해 주세요. 파일 읽기와 수정은 계속할 수 있습니다.');
     let members;
     try { members = importMemberPayload(rows, sportType); }
     catch (failure) { return setError(failure.message); }
-    setError(''); onSave(members);
+    saveRequest.current = true; setSaving(true); setError('');
+    try { await onSave(members); }
+    catch (failure) { setError(failure.message || '회원 등록에 실패했습니다. 다시 시도해 주세요.'); }
+    finally { saveRequest.current = false; setSaving(false); }
   }
   const columns = result?.kind === 'xlsx' ? Math.max(0, ...result.rows.map(row => row.length)) : 0;
   const options = Array.from({ length: columns }, (_, index) => {
@@ -47,12 +79,13 @@ export default function MemberImport({ onClose, onSave, busy, saveError, sportTy
     return <option value={index} key={index}>{index + 1}번째 열{header ? ` · ${header.slice(0, 30)}` : ''}</option>;
   });
   const ratingName = isLol(sportType) ? '티어' : '능력치';
-  return <div className="overlay" onClick={onClose}><section className="modal import-modal" role="dialog" aria-modal="true" aria-labelledby="import-title" onClick={e => e.stopPropagation()}>
-    <div className="modal-heading"><div><div className="eyebrow blue">IMPORT MEMBERS</div><h2 id="import-title">Excel에서 가져오기</h2></div><button className="close" disabled={busy} onClick={onClose} aria-label="닫기">×</button></div>
+  return <div className="overlay" onClick={close}><section className="modal import-modal" role="dialog" aria-modal="true" aria-labelledby="import-title" onClick={e => e.stopPropagation()}>
+    <div className="modal-heading"><div><div className="eyebrow blue">IMPORT MEMBERS</div><h2 id="import-title">Excel에서 가져오기</h2></div><button className="close" disabled={saving} onClick={close} aria-label="닫기">×</button></div>
     <p className="help">Excel(.xlsx)의 첫 번째 시트에서 이름·포지션·{ratingName} 열을 선택하세요. 가져온 값은 등록 전에 수정할 수 있습니다.</p>
-    <fieldset className="import-fields" disabled={busy || loading}>
-      <label>파일 선택<input type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={e => { setFile(e.target.files?.[0] || null); setResult(null); setRows([]); setError(''); }} /></label>
-      <button className="secondary import-button" type="button" onClick={extract}>{loading ? 'Excel 읽는 중…' : '파일에서 읽기'}</button>
+    <label>파일 선택<input type="file" disabled={saving} accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={chooseFile} /></label>
+    {file && <p className="help" role="status">선택한 파일: {file.name}</p>}
+    <button className="secondary import-button" type="button" disabled={loading || saving} onClick={extract}>{loading ? 'Excel 읽는 중…' : '파일에서 읽기'}</button>
+    <fieldset className="import-fields" disabled={loading || saving}>
       {result?.kind === 'xlsx' && <>
         <label className="check-line"><input type="checkbox" checked={skipHeader} onChange={e => { setSkipHeader(e.target.checked); setRows([]); setError(''); }} />첫 행은 제목</label>
         <label>이름이 있는 열<select value={mapping.name} onChange={e => changeMapping('name', e.target.value)}>{options}</select></label>
@@ -74,7 +107,7 @@ export default function MemberImport({ onClose, onSave, busy, saveError, sportTy
             {Array.from({ length: 10 }, (_, n) => <option key={n + 1} value={n + 1}>{isLol(sportType) ? lolTiers[n] : n + 1}</option>)}
           </select></label>
         </div>)}</div>
-        <button className="primary" type="button" onClick={submit}>선택한 회원 등록</button>
+        <button className="primary" type="button" disabled={busy || saving} onClick={submit}>{saving ? '회원 등록 중…' : '선택한 회원 등록'}</button>
       </>}
     </fieldset>
     {(error || saveError) && <p className="error" role="alert">{error || saveError}</p>}

@@ -47,6 +47,28 @@ class TeamAssignmentServiceTest {
     }
 
     @Test
+    fun `all twenty one lakers members can form two teams with Kobe and Shaquille together`() {
+        val owner = users.save(User("Fixture Owner"))
+        val club = clubs.save(Club(owner, "test", SportType.BASKETBALL))
+        val created = memberService.createBulk(owner.id!!, club.id!!, LakersBasketballFixture.members)
+        `when`(embeddings.classify(anyList())).thenReturn(listOf(ClassifiedClause("PAIR_RELATION", 0.95)))
+
+        val failure = assertFailsWith<ResponseStatusException> {
+            service.generate(owner.id!!, club.id!!, created.map { it.id }, 2, "코비와 오닐은 같은 팀")
+        }
+        assertEquals(HttpStatus.BAD_REQUEST, failure.statusCode)
+        assertTrue(failure.reason!!.contains("등록 이름"))
+
+        val result = service.generate(
+            owner.id!!, club.id!!, created.map { it.id }, 2,
+            "Kobe Bryant와 Shaquille O'Neal은 같은 팀",
+        )
+        assertEquals(listOf(11, 10), result.teams.map { it.members.size })
+        assertEquals(created.map { it.id }.sorted(), result.teams.flatMap { it.members }.map { it.memberId }.sorted())
+        assertTrue(result.teams.any { team -> team.members.map { it.name }.containsAll(listOf("Kobe Bryant", "Shaquille O'Neal")) })
+    }
+
+    @Test
     fun `lakers inspired test club assigns fourteen of twenty one members into two teams`() {
         val fixture = LakersBasketballFixture
         assertEquals(21, fixture.members.size)

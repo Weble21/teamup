@@ -30,6 +30,7 @@ import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.content
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
+import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
 import org.springframework.web.server.ResponseStatusException
 
 @WebMvcTest(TeamAssignmentController::class)
@@ -46,6 +47,19 @@ class TeamAssignmentControllerTest {
     private fun login() = oauth2Login().oauth2User(DefaultOAuth2User(
         listOf(SimpleGrantedAuthority("ROLE_USER")), mapOf("userId" to "7"), "userId",
     ))
+
+    @Test
+    fun `condition validation returns its reason as problem detail`() {
+        val reason = "선택한 참석자 2명의 등록 이름을 정확히 입력해 주세요."
+        `when`(service.generate(7, 3, listOf(5L, 8L), 2, "코비와 오닐은 같은 팀"))
+            .thenThrow(ResponseStatusException(HttpStatus.BAD_REQUEST, reason))
+        mvc.perform(post("/api/clubs/3/team-assignments").with(login()).with(csrf())
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("""{"memberIds":[5,8],"teamCount":2,"conditionText":"코비와 오닐은 같은 팀"}"""))
+            .andExpect(status().isBadRequest)
+            .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+            .andExpect(jsonPath("$.detail").value(reason))
+    }
 
     @Test
     fun `analysis requires auth and CSRF and uses the session user`() {

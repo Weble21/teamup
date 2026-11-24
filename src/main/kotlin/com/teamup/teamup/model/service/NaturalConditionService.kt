@@ -18,15 +18,8 @@ class NaturalConditionService(private val embeddings: EmbeddingConstraintClient)
         if (text.length > 500) invalid("조건은 500자 이하로 입력해 주세요.")
         val clauses = text.split('\n', ';').map { it.trim() }.filter { it.isNotEmpty() }
         if (clauses.isEmpty() || clauses.size > 5 || clauses.any { it.length > 150 }) invalid("조건은 한 줄에 하나씩 최대 5개 입력해 주세요.")
-        val duplicateNames = players.groupBy { it.name.trim() }.filterValues { it.size > 1 }.keys
-        val named = clauses.map { clause ->
-            val matches = players.filter { it.name.isNotBlank() && clause.contains(it.name.trim()) }
-            if (matches.any { it.name.trim() in duplicateNames }) invalid("같은 이름의 선수가 있어 조건을 해석할 수 없습니다.")
-            matches
-        }
-        val masked = clauses.mapIndexed { index, clause ->
-            named[index].sortedByDescending { it.name.length }.fold(clause) { value, player -> value.replace(player.name.trim(), "선수") }
-        }
+        val named = resolveNames(clauses, players)
+        val masked = named.map { it.masked }
         val classified = embeddings.classify(masked)
         val together = mutableListOf<Pair<Long, Long>>()
         val apart = mutableListOf<Pair<Long, Long>>()
@@ -34,14 +27,14 @@ class NaturalConditionService(private val embeddings: EmbeddingConstraintClient)
         val descriptions = mutableListOf<String>()
         clauses.forEachIndexed { index, clause ->
             val type = classified[index].type
-            val playersInClause = named[index]
+            val playersInClause = named[index].players
             val negatedTogether = Regex("(같은 팀|같이|함께).{0,20}(않|말|못|마|안|금지)").containsMatchIn(masked[index])
             val negatedApart = Regex("(다른 팀|따로|떨어|분리).{0,20}(않|말|못|마|안|금지)").containsMatchIn(masked[index])
             val negative = Regex("다른 팀|따로|떨어|분리").containsMatchIn(masked[index]) || negatedTogether
             val positive = Regex("같은 팀|함께|같이|한 팀|묶|붙여").containsMatchIn(masked[index]) && !negatedTogether
             when (type) {
                 "PAIR_RELATION" -> {
-                    if (playersInClause.size != 2) invalid("같은 팀·다른 팀 조건에는 참석 선수 2명의 이름이 필요합니다.")
+                    if (playersInClause.size != 2) invalid("같은 팀·다른 팀 조건에는 선택한 참석자 2명의 등록 이름을 입력해 주세요. 성을 생략한 한글 이름은 한 명으로 특정될 때만 사용할 수 있습니다. 별명이나 번역한 이름은 인식하지 못합니다.")
                     if (negatedApart || (negative && positive)) invalid("조건의 방향이 모호합니다. 같은 팀 또는 다른 팀 중 하나만 명시해 주세요.")
                     if (!negative && !positive) invalid("같은 팀인지 다른 팀인지 명시해 주세요.")
                     val pair = playersInClause.map { it.memberId }.sorted().let { it[0] to it[1] }
@@ -60,6 +53,35 @@ class NaturalConditionService(private val embeddings: EmbeddingConstraintClient)
         }
         if (together.any { it in apart }) invalid("같은 두 선수에게 같은 팀과 다른 팀 조건을 동시에 적용할 수 없습니다.")
         return TeamConstraints(together.distinct(), apart.distinct(), balancePositions, descriptions.distinct())
+    }
+
+    private data class NamedClause(val players: List<TeamParticipant>, val masked: String)
+
+    private fun resolveNames(clauses: List<String>, players: List<TeamParticipant>): List<NamedClause> {
+        val fullNames = players.filter { it.name.isNotBlank() }.groupBy { it.name.trim() }
+        // Only infer omission of one Hangul surname character; never translate or guess nicknames.
+        val shortNames = players.filter { Regex("[가-힣]{3,4}").matches(it.name.trim()) }
+            .groupBy { it.name.trim().drop(1) }
+        fun alternatives(names: Set<String>) = names.sortedByDescending { it.length }.joinToString("|") { Regex.escape(it) }
+        if (fullNames.isEmpty()) return clauses.map { NamedClause(emptyList(), it) }
+        val boundary = "[^\\p{L}\\p{N}_]"
+        val particles = "이랑|하고|에게|한테|와|과|은|는|이|가|을|를|도|만|랑|님|씨"
+        val shortPattern = if (shortNames.isEmpty()) "" else
+            "|(?<![\\p{L}\\p{N}_])(?:${alternatives(shortNames.keys)})(?=$|$boundary|(?:$particles)(?=$|$boundary))"
+        // Preserve full-name matching, including text without spaces; bound inferred short names to words.
+        val pattern = Regex("(?:${alternatives(fullNames.keys)})$shortPattern")
+        return clauses.map { clause ->
+            val found = linkedMapOf<Long, TeamParticipant>()
+            val masked = pattern.replace(clause) { match ->
+                // A registered full name takes precedence over another player's shortened name.
+                val candidates = fullNames[match.value] ?: shortNames.getValue(match.value)
+                if (candidates.size != 1) invalid("'${match.value}'에 해당하는 참석자가 여러 명입니다. 성을 포함한 전체 이름을 입력해 주세요.")
+                val player = candidates.single()
+                found[player.memberId] = player
+                "선수"
+            }
+            NamedClause(players.filter { it.memberId in found }, masked)
+        }
     }
 
     private fun invalid(message: String): Nothing = throw ResponseStatusException(HttpStatus.BAD_REQUEST, message)
