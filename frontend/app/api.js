@@ -3,7 +3,11 @@ export async function api(path, options = {}) {
   if (options.body) headers['Content-Type'] = 'application/json';
   if (options.method && options.method !== 'GET') {
     const tokenResponse = await fetch('/api/auth/csrf', { credentials: 'same-origin', cache: 'no-store' });
-    if (!tokenResponse.ok) throw new Error('로그인이 만료되었습니다. 다시 로그인해 주세요.');
+    if (!tokenResponse.ok) {
+      const failure = new Error('로그인이 만료되었습니다. 다시 로그인해 주세요.');
+      failure.status = tokenResponse.status;
+      throw failure;
+    }
     const csrf = await tokenResponse.json();
     headers[csrf.headerName] = csrf.token;
   }
@@ -14,7 +18,11 @@ export async function api(path, options = {}) {
       const problem = await response.json().catch(() => null);
       if (problem?.detail && /[가-힣]/.test(problem.detail)) throw new Error(problem.detail);
     }
-    throw new Error(messages[response.status] || '서버 요청에 실패했습니다. 잠시 후 다시 시도해 주세요.');
+    const invitationMessage = path.startsWith('/api/invitations/') && response.status === 404
+      ? '유효하지 않은 초대 링크입니다. 모임 관리자에게 새 링크를 요청해 주세요.' : null;
+    const failure = new Error(invitationMessage || messages[response.status] || '서버 요청에 실패했습니다. 잠시 후 다시 시도해 주세요.');
+    failure.status = response.status;
+    throw failure;
   }
   return response.status === 204 ? null : response.json();
 }

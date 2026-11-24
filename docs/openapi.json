@@ -1146,9 +1146,67 @@
       }
     },
     "/api/clubs/{clubId}/invitation": {
+      "get": {
+        "summary": "??? ?? ?? ?? ??",
+        "description": "???? ??? ?????. ??? ?? ???? ? token=null, requiresReissue=false. ?? ?? ?? ??? token=null, requiresReissue=true. ??? ??? ????? ????.",
+        "parameters": [
+          {
+            "name": "clubId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "?? ?? ?? ??",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "token",
+                    "requiresReissue"
+                  ],
+                  "properties": {
+                    "token": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "minLength": 43,
+                      "maxLength": 43
+                    },
+                    "requiresReissue": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "???"
+          },
+          "404": {
+            "description": "?? ?? ?? ??? ?? ??"
+          }
+        }
+      },
       "post": {
         "summary": "관리자 초대 링크 발급",
-        "description": "새 토큰을 발급하면 이전 토큰은 무효화됩니다. 원문은 이번 응답에서만 반환합니다.",
+        "description": "? ??? ???? ?? ??? ??????. ??? ??? ?? ?? ?? ????? ???? Cache-Control: no-store? ?????.",
         "parameters": [
           {
             "name": "clubId",
@@ -1249,10 +1307,102 @@
         }
       }
     },
+    "/api/invitations/preview": {
+      "post": {
+        "summary": "??? ? ?? ?? ?? ? ?? ?? ??",
+        "description": "??? ???? ???? ?? ??, ?? ???? ?? ??, ?? ??? ? ?? ?? ??? ?????. ???? ?? ??? ???? ????. ???? alreadyJoined=true???. ?? ?? ? CSRF ??.",
+        "parameters": [
+          {
+            "name": "X-CSRF-TOKEN",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "token"
+                ],
+                "properties": {
+                  "token": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_-]{43}$"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "?? ?? ??",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "clubId",
+                    "clubName",
+                    "sportType",
+                    "alreadyJoined",
+                    "profileRegistered"
+                  ],
+                  "properties": {
+                    "clubId": {
+                      "type": "integer",
+                      "format": "int64"
+                    },
+                    "clubName": {
+                      "type": "string"
+                    },
+                    "sportType": {
+                      "$ref": "#/components/schemas/SportType"
+                    },
+                    "alreadyJoined": {
+                      "type": "boolean"
+                    },
+                    "profileRegistered": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "??? ?? ??"
+          },
+          "401": {
+            "description": "???"
+          },
+          "403": {
+            "description": "CSRF ??"
+          },
+          "404": {
+            "description": "???? ?? ?? ??"
+          }
+        }
+      }
+    },
     "/api/invitations/join": {
       "post": {
-        "summary": "초대 링크로 모임 가입",
-        "description": "같은 사용자의 반복 가입은 중복되지 않습니다.",
+        "summary": "??? ??? ?? ?? ? ?? ?? ??",
+        "description": "??? ????? ?? ??? ? ??? ?? ??? ?????. ???? ?? ??? ??? ?????? ?????. ?? ????? ?? ??? ???? ?? alreadyJoined=true? ?????.",
         "parameters": [
           {
             "name": "X-CSRF-TOKEN",
@@ -1291,12 +1441,16 @@
                 "schema": {
                   "type": "object",
                   "required": [
-                    "clubId"
+                    "clubId",
+                    "alreadyJoined"
                   ],
                   "properties": {
                     "clubId": {
                       "type": "integer",
                       "format": "int64"
+                    },
+                    "alreadyJoined": {
+                      "type": "boolean"
                     }
                   }
                 }
@@ -1316,7 +1470,7 @@
             "description": "없는 대상 또는 타인 소유"
           },
           "409": {
-            "description": "데이터 제약 충돌"
+            "description": "?? ??? ? ??? ??? ??? ?? ??"
           }
         }
       }

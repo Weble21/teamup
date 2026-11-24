@@ -8,6 +8,7 @@ import org.springframework.data.jpa.repository.Query
 
 interface ClubInvitationRepository : JpaRepository<ClubInvitation, Long> {
     fun findByClubId(clubId: Long): ClubInvitation?
+    fun findByTokenHash(tokenHash: String): ClubInvitation?
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select i from ClubInvitation i where i.tokenHash = :hash")
     fun findByTokenHashForUpdate(hash: String): ClubInvitation?

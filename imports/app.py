@@ -24,7 +24,7 @@ async def extract(file: UploadFile = File(...)):
                 raise HTTPException(413, '압축 해제 크기가 너무 큽니다.')
         workbook = load_workbook(BytesIO(content), read_only=True, data_only=True)
         try:
-            sheet = workbook.active
+            sheet = workbook.worksheets[0]
             if sheet.max_row > 1000 or sheet.max_column > 50:
                 raise HTTPException(400, '첫 시트는 1000행·50열 이하만 지원합니다.')
             rows = [[str(value).strip() if value is not None else '' for value in row]

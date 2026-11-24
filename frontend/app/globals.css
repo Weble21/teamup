@@ -8,6 +8,7 @@
 .import-rows { display: grid; gap: 10px; margin: 16px 0; }
 .import-row { padding: 12px; background: white; border-radius: 12px; }
 .import-row label:not(.check-line) { margin: 8px 0; }
+.import-fields { min-width: 0; border: 0; margin: 0; padding: 0; }
 .social-logins { display: grid; gap: 10px; margin-top: 24px; }
 .social-login { position: relative; display: flex; align-items: center; justify-content: center; width: 100%; min-height: 54px; padding: 0 52px; border: 1px solid transparent; border-radius: 12px; font-size: 14px; font-weight: 700; text-align: center; text-decoration: none; transition: filter .15s ease, transform .15s ease; }
 .social-login:hover { filter: brightness(.96); }
@@ -34,6 +35,53 @@
 .team-insight small { display: block; margin-top: 8px; color: var(--muted); font-size: 10px; line-height: 1.5; }
 .invite-card input { margin: 10px 0; }
 .invite-card .text-button { margin-top: 10px; }
+.invite-card--compact { padding: 12px; margin: 12px 0; border-radius: 12px; }
+.invite-card--compact strong { font-size: 14px; }
+.invite-card--compact p, .invite-card--compact small { font-size: 11px; line-height: 1.45; }
+.invite-card--compact p { margin: 6px 0; }
+.invite-card--compact .button-row { gap: 8px; margin: 8px 0; }
+.invite-card--compact .secondary { height: 36px; border-radius: 9px; font-size: 12px; }
+.invite-card--compact input { padding: 10px 12px; margin: 8px 0 0; font-size: 12px; }
+.invite-card--compact .text-button { min-height: 32px; margin-top: 4px; }
+.invite-card--compact .invite-copy { display: block; margin-left: auto; }
+.club-edit-button { display: block; width: 100%; margin-top: 24px; }
+.invite-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.invite-card--compact .invite-toggle { margin-top: 0; }
+.invitation-onboarding { max-height: none; max-width: none; overflow: visible; }
+.invitation-onboarding h2 { font-size: 21px; }
+.invitation-cancel { display: block; min-height: 36px; margin: 12px 0 0 auto; }
+.alert-dialog { border: 0; width: calc(100% - 36px); color: var(--ink); }
+.alert-dialog::backdrop { background: #0a1729a8; }
+.alert-dialog h2 { font-size: 20px; margin: 0 0 12px; }
+.alert-dialog p { font-size: 14px; line-height: 1.6; margin: 0 0 20px; }
+.alert-dialog[open] { animation: alert-fade-up 180ms ease-out both; }
+.alert-dialog.alert-dialog--closing { animation: alert-fade-down 180ms ease-in both; }
+@keyframes alert-fade-up {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes alert-fade-down {
+  from { opacity: 1; transform: translateY(0); }
+  to { opacity: 0; transform: translateY(12px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .alert-dialog[open], .alert-dialog.alert-dialog--closing { animation-duration: 1ms; }
+}
+.toast { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.toast-close { flex: 0 0 auto; border: 0; background: transparent; color: inherit; padding: 4px 8px; font-size: 16px; }
+.toast--opening { animation: toast-fade-up 180ms ease-out both; }
+.toast--closing { animation: toast-fade-down 180ms ease-in both; pointer-events: none; }
+@keyframes toast-fade-up {
+  from { opacity: 0; transform: translate(-50%, 12px); }
+  to { opacity: 1; transform: translate(-50%, 0); }
+}
+@keyframes toast-fade-down {
+  from { opacity: 1; transform: translate(-50%, 0); }
+  to { opacity: 0; transform: translate(-50%, 12px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .toast--opening, .toast--closing { animation-duration: 1ms; }
+}
 .conditions-input { min-height: 96px; resize: vertical; border: 1px solid #dce4ef; line-height: 1.5; }
 .guide-steps { display: grid; gap: 12px; list-style: none; padding: 0; margin: 0; }
 .guide-step { display: flex; gap: 15px; padding: 20px; border-radius: 14px; background: #fff; }
