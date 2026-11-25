@@ -45,7 +45,9 @@ class AttendanceVoteServiceTest {
         service.respond(clubId, vote.id, member.id!!, AttendanceChoice.UNDECIDED)
         service.respond(clubId, vote.id, member.id!!, AttendanceChoice.ATTENDING)
         assertEquals(AttendanceChoice.ATTENDING, service.list(clubId, owner.id!!).single().responses.single().choice)
-        assertEquals("member", service.list(clubId, owner.id!!).single().responses.single().name)
+        assertEquals("선수 프로필 미등록", service.list(clubId, owner.id!!).single().responses.single().name)
+        members.save(ClubMember(club, "이지훈", "PG", 70, user = member))
+        assertEquals("이지훈", service.list(clubId, owner.id!!).single().responses.single().name)
         assertEquals(HttpStatus.NOT_FOUND, assertFailsWith<ResponseStatusException> { service.list(clubId, outsider.id!!) }.statusCode)
         assertEquals(HttpStatus.FORBIDDEN, assertFailsWith<ResponseStatusException> {
             service.create(clubId, member.id!!, "title", "place", LocalDate.now(), Instant.now().plusSeconds(18000))

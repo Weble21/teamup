@@ -53,7 +53,7 @@ class AttendanceVoteService(
             .associate { checkNotNull(it.user?.id) to it.name }
         return items.map { vote ->
             val people = byVote[vote.id].orEmpty().map {
-                VotePerson(checkNotNull(it.user.id), namesByUser[it.user.id] ?: it.user.name, it.choice)
+                VotePerson(checkNotNull(it.user.id), namesByUser[it.user.id] ?: "선수 프로필 미등록", it.choice)
             }
             VoteView(checkNotNull(vote.id), vote.title, vote.location, vote.exerciseDate, vote.closesAt,
                 people.find { it.userId == userId }?.choice, people, !Instant.now().isBefore(vote.closesAt),
