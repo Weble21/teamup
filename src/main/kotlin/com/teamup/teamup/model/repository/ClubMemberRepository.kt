@@ -3,6 +3,8 @@ package com.teamup.teamup.model.repository
 import com.teamup.teamup.model.entity.ClubMember
 import org.springframework.data.jpa.repository.JpaRepository
 import org.springframework.data.jpa.repository.Query
+import org.springframework.data.jpa.repository.Lock
+import jakarta.persistence.LockModeType
 
 interface ClubMemberRepository : JpaRepository<ClubMember, Long> {
     fun countByClubIdAndActiveTrue(clubId: Long): Long
@@ -13,6 +15,10 @@ interface ClubMemberRepository : JpaRepository<ClubMember, Long> {
     fun findAllByClubIdAndActiveTrueAndIdIn(clubId: Long, ids: Collection<Long>): List<ClubMember>
     fun findByIdAndClubId(id: Long, clubId: Long): ClubMember?
     fun findByClubIdAndUserId(clubId: Long, userId: Long): ClubMember?
+    fun findAllByClubIdAndActiveTrueAndUserIsNullOrderByNameAscIdAsc(clubId: Long): List<ClubMember>
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select m from ClubMember m where m.id = :id and m.club.id = :clubId")
+    fun findForUpdate(id: Long, clubId: Long): ClubMember?
 }
 
 interface ActiveClubCount {

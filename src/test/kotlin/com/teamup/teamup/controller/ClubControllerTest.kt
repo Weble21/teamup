@@ -5,6 +5,7 @@ import com.teamup.teamup.model.auth.SocialOAuth2UserService
 import com.teamup.teamup.model.auth.SocialOidcUserService
 import com.teamup.teamup.model.entity.SportType
 import com.teamup.teamup.model.service.ClubService
+import com.teamup.teamup.model.service.NewClubMember
 import com.teamup.teamup.view.ClubResponse
 import org.junit.jupiter.api.Test
 import org.mockito.Mockito.`when`
@@ -163,15 +164,16 @@ class ClubControllerTest {
 
     @Test
     fun `creates club using authenticated owner and returns 201 and location`() {
-        `when`(clubService.create(7, "Weekend", SportType.BASKETBALL))
-            .thenReturn(ClubResponse(3, "Weekend", SportType.BASKETBALL, 7))
+        val profile = NewClubMember("Captain", "PG", 70, null, null)
+        `when`(clubService.create(7, "Weekend", SportType.BASKETBALL, profile))
+            .thenReturn(ClubResponse(3, "Weekend", SportType.BASKETBALL, 7, 1))
         mvc.perform(post("/api/clubs").with(login()).with(csrf())
             .contentType(MediaType.APPLICATION_JSON)
-            .content("""{"name":"Weekend","sportType":"BASKETBALL","ownerId":99}"""))
+            .content("""{"name":"Weekend","sportType":"BASKETBALL","ownerId":99,"ownerProfile":{"name":"Captain","position":"PG","rating":70}}"""))
             .andExpect(status().isCreated)
             .andExpect(header().string("Location", "/api/clubs/3"))
             .andExpect(content().json("""{"id":3,"name":"Weekend","sportType":"BASKETBALL","ownerId":7}"""))
-        verify(clubService).create(7, "Weekend", SportType.BASKETBALL)
+        verify(clubService).create(7, "Weekend", SportType.BASKETBALL, profile)
     }
 
     @Test
@@ -194,9 +196,22 @@ class ClubControllerTest {
     fun `blank and oversized names are rejected`() {
         for (name in listOf("", "   ", "a".repeat(101))) {
             mvc.perform(post("/api/clubs").with(login()).with(csrf()).contentType(MediaType.APPLICATION_JSON)
-                .content("""{"name":"$name","sportType":"BASKETBALL"}"""))
+                .content("""{"name":"$name","sportType":"BASKETBALL","ownerProfile":{"name":"Captain","position":"PG","rating":70}}"""))
                 .andExpect(status().isBadRequest)
         }
+        verifyNoInteractions(clubService)
+    }
+
+    @Test
+    fun `creating a club rejects missing or invalid owner profile`() {
+        val bodies = listOf(
+            """{"name":"Weekend","sportType":"BASKETBALL"}""",
+            """{"name":"Weekend","sportType":"BASKETBALL","ownerProfile":null}""",
+            """{"name":"Weekend","sportType":"BASKETBALL","ownerProfile":{"name":"Captain","position":" ","rating":70}}""",
+            """{"name":"Weekend","sportType":"BASKETBALL","ownerProfile":{"name":"Captain","position":"PG","rating":0}}""",
+        )
+        for (body in bodies) mvc.perform(post("/api/clubs").with(login()).with(csrf())
+            .contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().isBadRequest)
         verifyNoInteractions(clubService)
     }
 

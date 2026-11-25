@@ -10,7 +10,7 @@ import java.util.Properties
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
-// Explicit opt-in only: applies migrations to the configured local DB; never deletes data.
+// Explicit opt-in only: applies all configured migrations, including removal of obsolete profile data.
 @EnabledIfSystemProperty(named = "teamup.verifyMysql", matches = "true")
 class LocalMySqlMigrationTest {
     @Test
@@ -33,7 +33,9 @@ class LocalMySqlMigrationTest {
                 }
                 statement.executeQuery("SELECT COUNT(*) FROM matches").use { result -> assertTrue(result.next()) }
                 statement.executeQuery("SELECT COUNT(*) FROM club_invitations").use { result -> assertTrue(result.next()) }
-                statement.executeQuery("SELECT COUNT(*) FROM user_sport_profiles").use { result -> assertTrue(result.next()) }
+                statement.executeQuery("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'user_sport_profiles'").use { result ->
+                    result.next(); assertEquals(0, result.getInt(1))
+                }
             }
         }
     }

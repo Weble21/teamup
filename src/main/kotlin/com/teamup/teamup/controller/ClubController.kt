@@ -1,6 +1,7 @@
 package com.teamup.teamup.controller
 
 import com.teamup.teamup.model.service.ClubService
+import com.teamup.teamup.model.service.NewClubMember
 import com.teamup.teamup.view.ClubResponse
 import jakarta.validation.Valid
 import org.springframework.http.HttpStatus
@@ -44,7 +45,9 @@ class ClubController(
         @AuthenticationPrincipal principal: OAuth2User?,
         @Valid @RequestBody request: CreateClubRequest,
     ): ResponseEntity<ClubResponse> {
-        val response = clubService.create(currentUserId(principal), request.name, request.sportType)
+        val profile = request.ownerProfile
+        val response = clubService.create(currentUserId(principal), request.name, request.sportType,
+            NewClubMember(profile.name, profile.position, profile.rating, profile.age, profile.notes))
         return ResponseEntity.created(URI.create("/api/clubs/${response.id}")).body(response)
     }
 

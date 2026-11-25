@@ -47,6 +47,18 @@ class TeamAssignmentServiceTest {
     }
 
     @Test
+    fun `returns a warning when all valid assignments exceed the balance threshold`() {
+        val owner = users.save(User("Owner"))
+        val club = clubs.save(Club(owner, "Club", SportType.BASKETBALL))
+        val players = listOf(10, 100).mapIndexed { index, rating ->
+            memberService.create(owner.id!!, club.id!!, "Player $index", "PG", rating, null, null)
+        }
+        val result = service.generate(owner.id!!, club.id!!, players.map { it.id }, 2)
+        assertTrue(result.balanceLimited)
+        assertEquals(2, result.teams.size)
+    }
+
+    @Test
     fun `all twenty one lakers members can form two teams with Kobe and Shaquille together`() {
         val owner = users.save(User("Fixture Owner"))
         val club = clubs.save(Club(owner, "test", SportType.BASKETBALL))

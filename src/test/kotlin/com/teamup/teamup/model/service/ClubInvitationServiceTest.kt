@@ -2,7 +2,6 @@ package com.teamup.teamup.model.service
 
 import com.teamup.teamup.model.entity.Club
 import com.teamup.teamup.model.entity.SportType
-import com.teamup.teamup.model.entity.UserSportProfile
 import com.teamup.teamup.model.entity.ClubMember
 import com.teamup.teamup.model.entity.ClubMembership
 import com.teamup.teamup.model.entity.User
@@ -33,15 +32,59 @@ class ClubInvitationServiceTest {
     @Autowired lateinit var members: ClubMemberRepository
     @Autowired lateinit var memberships: ClubMembershipRepository
     @Autowired lateinit var invitations: ClubInvitationRepository
-    @Autowired lateinit var sportProfiles: UserSportProfileRepository
 
-    private fun player(name: String): User = users.save(User(name)).also {
-        sportProfiles.save(UserSportProfile(it, SportType.FUTSAL, name, "FW", 60, 23, "profile note"))
-    }
+    private fun player(name: String): User = users.save(User(name))
     @AfterEach
     fun clean() {
         members.deleteAllInBatch(); memberships.deleteAllInBatch(); invitations.deleteAllInBatch()
-        clubs.deleteAllInBatch(); sportProfiles.deleteAllInBatch(); users.deleteAllInBatch()
+        clubs.deleteAllInBatch(); users.deleteAllInBatch()
+    }
+
+    @Test
+    fun `selecting an existing player preserves details and rejects reuse by another account`() {
+        val owner = users.save(User("Owner")); val first = users.save(User("First")); val second = users.save(User("Second"))
+        val club = clubs.save(Club(owner, "Club", SportType.FUTSAL))
+        val original = members.saveAndFlush(ClubMember(club, "Player", "GK", 73, 27, "notes"))
+        val token = invites.issue(owner.id!!, club.id!!)
+        assertEquals(listOf(original.id), invites.preview(first.id!!, token).candidates.map { it.id })
+        invites.join(first.id!!, token, original.id!!, null)
+        val linked = members.findByClubIdAndUserId(club.id!!, first.id!!)!!
+        assertEquals(original.id, linked.id); assertEquals(73, linked.rating); assertEquals("notes", linked.notes)
+        assertTrue(invites.preview(second.id!!, token).candidates.isEmpty())
+        assertEquals(HttpStatus.CONFLICT, assertFailsWith<ResponseStatusException> { invites.join(second.id!!, token, original.id!!, null) }.statusCode)
+        assertFalse(memberships.existsByClubIdAndUserId(club.id!!, second.id!!))
+    }
+
+    @Test
+    fun `concurrent claims of one player link exactly one account`() {
+        val owner = users.save(User("Owner")); val first = users.save(User("First")); val second = users.save(User("Second"))
+        val club = clubs.save(Club(owner, "Club", SportType.FUTSAL))
+        val player = members.saveAndFlush(ClubMember(club, "Player", "FW", 60))
+        val token = invites.issue(owner.id!!, club.id!!)
+        val start = CountDownLatch(1); val pool = Executors.newFixedThreadPool(2)
+        try {
+            val attempts = listOf(first, second).map { user -> pool.submit<Boolean> {
+                start.await()
+                try { invites.join(user.id!!, token, player.id!!, null); true }
+                catch (failure: ResponseStatusException) { assertEquals(HttpStatus.CONFLICT, failure.statusCode); false }
+            } }
+            start.countDown()
+            assertEquals(1, attempts.count { it.get(10, TimeUnit.SECONDS) })
+            assertEquals(1, memberships.count()); assertEquals(1, members.count())
+        } finally { pool.shutdownNow() }
+    }
+
+    @Test
+    fun `joining rejects invalid selection and has no partial membership`() {
+        val owner = users.save(User("Owner")); val outsider = users.save(User("Outsider"))
+        val club = clubs.save(Club(owner, "Club", SportType.FUTSAL))
+        val other = clubs.save(Club(owner, "Other", SportType.FUTSAL))
+        val foreign = members.saveAndFlush(ClubMember(other, "Other", "FW", 50))
+        val inactive = members.saveAndFlush(ClubMember(club, "Inactive", "FW", 50).also { it.deactivate() })
+        val token = invites.issue(owner.id!!, club.id!!)
+        assertEquals(HttpStatus.BAD_REQUEST, assertFailsWith<ResponseStatusException> { invites.join(outsider.id!!, token, null, null) }.statusCode)
+        for (id in listOf(foreign.id!!, inactive.id!!)) assertEquals(HttpStatus.CONFLICT, assertFailsWith<ResponseStatusException> { invites.join(outsider.id!!, token, id, null) }.statusCode)
+        assertFalse(memberships.existsByClubIdAndUserId(club.id!!, outsider.id!!))
     }
 
     @Test
@@ -51,23 +94,9 @@ class ClubInvitationServiceTest {
         memberships.saveAndFlush(ClubMembership(club, member))
         val token = invites.issue(owner.id!!, club.id!!)
         val preview = invites.preview(member.id!!, token)
-        assertTrue(preview.alreadyJoined); assertFalse(preview.profileRegistered)
-        assertTrue(invites.join(member.id!!, token).alreadyJoined)
+        assertTrue(preview.alreadyJoined); assertTrue(preview.candidates.isEmpty())
+        assertTrue(invites.join(member.id!!, token, null, NewClubMember("Player", "FW", 60, 23, "profile note")).alreadyJoined)
         assertEquals(1, memberships.count()); assertEquals(0, members.count())
-    }
-
-    @Test
-    fun `same name unlinked player is not claimed during automatic registration`() {
-        val owner = users.save(User("Owner")); val member = player("Same Name")
-        val club = clubs.save(Club(owner, "Names", SportType.FUTSAL))
-        val original = members.saveAndFlush(ClubMember(club, "Same Name", "GK", 10))
-        val token = invites.issue(owner.id!!, club.id!!)
-        invites.join(member.id!!, token)
-        assertEquals(2, members.count())
-        val roster = members.findAllByClubIdOrderByIdDesc(club.id!!)
-        assertNull(roster.single { it.id == original.id }.user)
-        assertEquals(10, roster.single { it.id == original.id }.rating)
-        assertEquals(60, members.findByClubIdAndUserId(club.id!!, member.id!!)!!.rating)
     }
 
     @Test
@@ -79,7 +108,7 @@ class ClubInvitationServiceTest {
         try {
             val accept = pool.submit<Boolean> {
                 start.await()
-                try { invites.join(member.id!!, token); true }
+                try { invites.join(member.id!!, token, null, NewClubMember("Player", "FW", 60, 23, "profile note")); true }
                 catch (failure: ResponseStatusException) { assertEquals(HttpStatus.NOT_FOUND, failure.statusCode); false }
             }
             val revoke = pool.submit { start.await(); invites.revoke(owner.id!!, clubId) }
@@ -100,69 +129,11 @@ class ClubInvitationServiceTest {
         assertEquals(clubId, preview.clubId)
         assertEquals("Onboarding", preview.clubName)
         assertEquals(SportType.FUTSAL, preview.sportType)
-        assertFalse(preview.alreadyJoined); assertFalse(preview.profileRegistered)
+        assertFalse(preview.alreadyJoined); assertTrue(preview.candidates.isEmpty())
         assertEquals(0, memberships.count()); assertEquals(0, members.count())
         assertTrue(invites.preview(owner.id!!, token).alreadyJoined)
-        assertFalse(invites.preview(owner.id!!, token).profileRegistered)
-        assertTrue(invites.join(owner.id!!, token).alreadyJoined)
-        assertEquals(0, memberships.count()); assertEquals(0, members.count())
-    }
-
-    @Test
-    fun `missing or different sport profile prevents any partial membership or roster write`() {
-        val owner = users.save(User("Owner")); val newcomer = users.save(User("New"))
-        val clubId = clubs.save(Club(owner, "Onboarding", SportType.FUTSAL)).id!!
-        val token = invites.issue(owner.id!!, clubId)
-        sportProfiles.save(UserSportProfile(newcomer, SportType.BASKETBALL, "Other sport", "C", 50, null, null))
-        assertFalse(invites.preview(newcomer.id!!, token).profileRegistered)
-        assertEquals(HttpStatus.CONFLICT, assertFailsWith<ResponseStatusException> { invites.join(newcomer.id!!, token) }.statusCode)
-        assertEquals(0, memberships.count()); assertEquals(0, members.count())
-    }
-
-    @Test
-    fun `acceptance copies matching profile once and repeat acceptance never overwrites it`() {
-        val owner = users.save(User("Owner")); val newcomer = player("New")
-        val clubId = clubs.save(Club(owner, "Onboarding", SportType.FUTSAL)).id!!
-        val token = invites.issue(owner.id!!, clubId)
-        assertTrue(invites.preview(newcomer.id!!, token).profileRegistered)
-        assertEquals(0, memberships.count()); assertEquals(0, members.count())
-        assertFalse(invites.join(newcomer.id!!, token).alreadyJoined)
-        val member = members.findByClubIdAndUserId(clubId, newcomer.id!!)!!
-        assertEquals("New", member.name); assertEquals("FW", member.position); assertEquals(60, member.rating)
-        assertEquals(23, member.age); assertEquals("profile note", member.notes)
-        val profile = sportProfiles.findByUserIdAndSportType(newcomer.id!!, SportType.FUTSAL)!!
-        profile.update("Changed", "GK", 90, null, null); sportProfiles.saveAndFlush(profile)
-        assertTrue(invites.preview(newcomer.id!!, token).alreadyJoined)
-        assertTrue(invites.join(newcomer.id!!, token).alreadyJoined)
-        assertEquals("New", members.findByClubIdAndUserId(clubId, newcomer.id!!)!!.name)
-        assertEquals(1, memberships.count()); assertEquals(1, members.count())
-    }
-
-    @Test
-    fun `existing linked inactive player and unlinked same name player remain untouched`() {
-        val owner = users.save(User("Owner")); val newcomer = player("New")
-        val club = clubs.save(Club(owner, "Onboarding", SportType.FUTSAL)); val clubId = club.id!!
-        val linked = ClubMember(club, "Old", "GK", 10, null, null, newcomer).also { it.deactivate() }
-        members.saveAndFlush(linked)
-        members.saveAndFlush(ClubMember(club, "New", "FW", 50))
-        val token = invites.issue(owner.id!!, clubId)
-        invites.join(newcomer.id!!, token)
-        val saved = members.findByClubIdAndUserId(clubId, newcomer.id!!)!!
-        assertEquals("Old", saved.name); assertFalse(saved.active)
-        assertEquals(2, members.count())
-        assertNull(members.findAllByClubIdOrderByIdDesc(clubId).single { it.name == "New" }.user)
-    }
-
-    @Test
-    fun `club sport changed after preview is checked again at acceptance`() {
-        val owner = users.save(User("Owner")); val newcomer = player("New")
-        val clubId = clubs.save(Club(owner, "Change sport", SportType.FUTSAL)).id!!
-        val token = invites.issue(owner.id!!, clubId)
-        assertTrue(invites.preview(newcomer.id!!, token).profileRegistered)
-        clubService.update(owner.id!!, clubId, "Change sport", SportType.BASKETBALL)
-        assertEquals(HttpStatus.CONFLICT, assertFailsWith<ResponseStatusException> { invites.join(newcomer.id!!, token) }.statusCode)
-        assertFalse(invites.preview(newcomer.id!!, token).profileRegistered)
-        assertEquals(SportType.BASKETBALL, invites.preview(newcomer.id!!, token).sportType)
+        assertTrue(invites.preview(owner.id!!, token).candidates.isEmpty())
+        assertTrue(invites.join(owner.id!!, token, null, NewClubMember("Player", "FW", 60, 23, "profile note")).alreadyJoined)
         assertEquals(0, memberships.count()); assertEquals(0, members.count())
     }
 
@@ -196,7 +167,7 @@ class ClubInvitationServiceTest {
         val legacy = invites.getCurrent(owner.id!!, clubId)
         assertNull(legacy.token)
         assertTrue(legacy.requiresReissue)
-        assertEquals(clubId, invites.join(member.id!!, token).clubId)
+        assertEquals(clubId, invites.join(member.id!!, token, null, NewClubMember("Player", "FW", 60, 23, "profile note")).clubId)
         invites.issue(owner.id!!, clubId)
         assertFalse(invites.getCurrent(owner.id!!, clubId).requiresReissue)
     }
@@ -206,7 +177,7 @@ class ClubInvitationServiceTest {
         val owner = users.save(User("Owner")); val member = player("Member"); val other = users.save(User("Other"))
         val clubId = clubs.save(Club(owner, "Private", SportType.FUTSAL)).id!!
         val token = invites.issue(owner.id!!, clubId)
-        invites.join(member.id!!, token)
+        invites.join(member.id!!, token, null, NewClubMember("Player", "FW", 60, 23, "profile note"))
         for (id in listOf(member.id!!, other.id!!)) {
             assertEquals(HttpStatus.NOT_FOUND, assertFailsWith<ResponseStatusException> { invites.getCurrent(id, clubId) }.statusCode)
         }
@@ -221,8 +192,8 @@ class ClubInvitationServiceTest {
         val token = invites.issue(owner.id!!, clubId)
         assertEquals(43, token.length)
         assertNotEquals(token, invitations.findByClubId(clubId)!!.tokenHash)
-        assertEquals(clubId, invites.join(first.id!!, token).clubId)
-        invites.join(first.id!!, token); invites.join(second.id!!, token); invites.join(owner.id!!, token)
+        assertEquals(clubId, invites.join(first.id!!, token, null, NewClubMember("Player", "FW", 60, 23, "profile note")).clubId)
+        invites.join(first.id!!, token, null, NewClubMember("Player", "FW", 60, 23, "profile note")); invites.join(second.id!!, token, null, NewClubMember("Player", "FW", 60, 23, "profile note")); invites.join(owner.id!!, token, null, NewClubMember("Player", "FW", 60, 23, "profile note"))
         assertEquals(2, memberships.count())
         assertEquals(listOf(clubId), clubService.getMyClubs(first.id!!).map { it.id })
         assertEquals(owner.id, clubService.getMyClub(first.id!!, clubId).ownerId)
@@ -231,11 +202,11 @@ class ClubInvitationServiceTest {
     @Test
     fun `rotation and revoke invalidate links without removing joined users`() {
         val owner = users.save(User("Owner")); val user = player("Member"); val club = clubs.save(Club(owner, "Club", SportType.FUTSAL))
-        val first = invites.issue(owner.id!!, club.id!!); invites.join(user.id!!, first)
+        val first = invites.issue(owner.id!!, club.id!!); invites.join(user.id!!, first, null, NewClubMember("Player", "FW", 60, 23, "profile note"))
         val second = invites.issue(owner.id!!, club.id!!)
-        assertEquals(HttpStatus.NOT_FOUND, assertFailsWith<ResponseStatusException> { invites.join(user.id!!, first) }.statusCode)
+        assertEquals(HttpStatus.NOT_FOUND, assertFailsWith<ResponseStatusException> { invites.join(user.id!!, first, null, NewClubMember("Player", "FW", 60, 23, "profile note")) }.statusCode)
         invites.revoke(owner.id!!, club.id!!)
-        assertEquals(HttpStatus.NOT_FOUND, assertFailsWith<ResponseStatusException> { invites.join(user.id!!, second) }.statusCode)
+        assertEquals(HttpStatus.NOT_FOUND, assertFailsWith<ResponseStatusException> { invites.join(user.id!!, second, null, NewClubMember("Player", "FW", 60, 23, "profile note")) }.statusCode)
         assertEquals(1, memberships.count())
     }
 
@@ -246,7 +217,7 @@ class ClubInvitationServiceTest {
         val start = CountDownLatch(1)
         val pool = Executors.newFixedThreadPool(2)
         try {
-            val calls = (1..2).map { pool.submit<Long> { start.await(); invites.join(user.id!!, token).clubId } }
+            val calls = (1..2).map { pool.submit<Long> { start.await(); invites.join(user.id!!, token, null, NewClubMember("Player", "FW", 60, 23, "profile note")).clubId } }
             start.countDown()
             calls.forEach { assertEquals(club.id, it.get(10, TimeUnit.SECONDS)) }
             assertEquals(1, memberships.count())
@@ -258,7 +229,7 @@ class ClubInvitationServiceTest {
     fun `invited users can read roster but only edit their own profile`() {
         val owner = users.save(User("Owner")); val a = player("A"); val b = player("B"); val outsider = users.save(User("Other"))
         val club = clubs.save(Club(owner, "Club", SportType.FUTSAL)); val clubId = club.id!!
-        val token = invites.issue(owner.id!!, clubId); invites.join(a.id!!, token); invites.join(b.id!!, token)
+        val token = invites.issue(owner.id!!, clubId); invites.join(a.id!!, token, null, NewClubMember("Player", "FW", 60, 23, "profile note")); invites.join(b.id!!, token, null, NewClubMember("Player", "FW", 60, 23, "profile note"))
         val input = NewClubMember("A", "PG", 60, 23, "private")
         val aProfile = profiles.saveMyProfile(a.id!!, clubId, input)
         val bProfile = profiles.saveMyProfile(b.id!!, clubId, input.copy(name = "B"))
@@ -268,8 +239,8 @@ class ClubInvitationServiceTest {
         assertTrue(visible.single { it.id == aProfile.id }.mine)
         assertEquals(23, visible.single { it.id == aProfile.id }.age)
         assertFalse(visible.single { it.id == bProfile.id }.mine)
-        assertNull(visible.single { it.id == bProfile.id }.age)
-        assertNull(visible.single { it.id == bProfile.id }.notes)
+        assertEquals(23, visible.single { it.id == bProfile.id }.age)
+        assertEquals("private", visible.single { it.id == bProfile.id }.notes)
         assertEquals(2, profiles.getMembers(owner.id!!, clubId).size)
         assertEquals(HttpStatus.NOT_FOUND, assertFailsWith<ResponseStatusException> { profiles.update(a.id!!, clubId, bProfile.id, "Hack", "PG", 60, null, null) }.statusCode)
         assertEquals(HttpStatus.NOT_FOUND, assertFailsWith<ResponseStatusException> { invites.issue(a.id!!, clubId) }.statusCode)

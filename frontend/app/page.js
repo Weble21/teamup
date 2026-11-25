@@ -6,16 +6,19 @@ import { api, sports, sportCode, teamPlayers, matchView } from './api';
 import MemberImport from './MemberImport';
 import UserGuide from './UserGuide';
 import RatingField from './RatingField';
+import ClubOwnerProfileFields from './ClubOwnerProfileFields';
 import Toast from './Toast';
 import ClubInvitationPanel from './ClubInvitationPanel';
 import InvitationOnboarding from './InvitationOnboarding';
 import AlertModal from './AlertModal';
+import AttendanceVotes from './AttendanceVotes';
 import { requestedClub, clubPageUrl } from './clubNavigation.mjs';
 import { formatRating, isLol } from './ratings.mjs';
 
 const guestStorageKey = 'teamup:guest:v1';
 const invitationStorageKey = 'teamup:invite:v1';
 const uid = () => globalThis.crypto.randomUUID();
+const elapsedClock = () => performance.now();
 const average = (team) => team.length ? team.reduce((sum, p) => sum + p.rating, 0) / team.length : 0;
 const displayRating = (rating) => rating / 10;
 const blankMember = { name: '', position: '', rating: 50, age: '', notes: '' };
@@ -54,13 +57,14 @@ function assign(players, count) {
 
 export default function Home() {
   const [user, setUser] = useState(null);
-  const [sportProfiles, setSportProfiles] = useState({});
   const [busy, setBusy] = useState(false);
   const [historyNext, setHistoryNext] = useState(false);
   const [historyPage, setHistoryPage] = useState(0);
   const operation = useRef(false);
   const confirmationId = useRef(null);
   const analysisRequestId = useRef(0);
+  const generationRequestId = useRef(0);
+  const generatingRef = useRef(false);
   const choseGuest = useRef(false);
   const [clubs, setClubs] = useState([]);
   const [storageError, setStorageError] = useState('');
@@ -85,6 +89,9 @@ export default function Home() {
   const [interpretedConditions, setInterpretedConditions] = useState([]);
   const [attendees, setAttendees] = useState([]);
   const [teams, setTeams] = useState([]);
+  const [generating, setGenerating] = useState(false);
+  const [generationElapsed, setGenerationElapsed] = useState(0);
+  const [balanceLimited, setBalanceLimited] = useState(false);
   const [analysis, setAnalysis] = useState(null);
   const [analysisStatus, setAnalysisStatus] = useState('idle');
   const [swap, setSwap] = useState(null);
@@ -99,6 +106,10 @@ export default function Home() {
       ? 'LWB, MF, LW, ST를 골고루 나눠줘'
       : '포지션을 골고루 나눠줘';
   const conditionExample = `예: 민수와 철수는 다른 팀\n예: ${positionExample}`;
+
+  useEffect(() => {
+    return () => { generationRequestId.current += 1; generatingRef.current = false; setGenerating(false); };
+  }, [clubId, screen]);
 
   function enterGuest() {
     choseGuest.current = true;
@@ -136,10 +147,10 @@ export default function Home() {
           return;
         }
         const current = await response.json();
-        const [rows, profiles] = await Promise.all([loadServerClubs(), api('/api/users/me/sport-profiles')]);
+        const rows = await loadServerClubs();
         if (!cancelled && !choseGuest.current) {
           const target = storedInvite ? null : requestedClub(location.search, rows);
-          setUser(current); setClubs(rows); setSportProfiles(Object.fromEntries(profiles.map(profile => [profile.sportType, profile])));
+          setUser(current); setClubs(rows);
           setClubId(target?.id ?? null); setScreen(storedInvite ? 'invitation' : target ? 'detail' : 'clubs');
           if (!storedInvite && new URLSearchParams(location.search).has('club') && !target) setNotice('해당 모임에 접근할 수 없어 목록으로 이동했습니다.');
         }
@@ -184,7 +195,7 @@ export default function Home() {
   }, [setScreen, setModalNotice]);
 
   const invitationLoginRequired = useCallback(() => {
-    setUser(null); setClubs([]); setSportProfiles({}); setClubId(null); setScreen('welcome');
+    setUser(null); setClubs([]); setClubId(null); setScreen('welcome');
     setModalNotice('다시 로그인해 주세요. 로그인 후 초대를 이어서 진행합니다.');
   }, [setScreen, setModalNotice]);
   function cancelInvitation() {
@@ -222,7 +233,7 @@ export default function Home() {
   function logout() {
     return serverOperation(async () => {
       await api('/api/auth/logout', { method: 'POST' });
-      setUser(null); setClubs([]); setSportProfiles({}); setClubId(null); setScreen('welcome'); setNotice('로그아웃했습니다.');
+      setUser(null); setClubs([]); setClubId(null); setScreen('welcome'); setNotice('로그아웃했습니다.');
     });
   }
 
@@ -235,37 +246,42 @@ export default function Home() {
     }
   }
   function updateClub(fn) { return persistClubs(clubs.map(c => c.id === clubId ? fn(c) : c)); }
-  function openDialog(type, value = {}) { setForm(value); setError(''); setDialog(type); }
-  function openMySportProfile(sportType) {
-    openDialog('sportProfile', { ...blankMember, name: user.name, ...sportProfiles[sportType], sportType });
+  function openDialog(type, value = {}) {
+    const initial = type === 'club' && !value.id
+      ? { ...value, ownerProfile: { ...blankMember, name: user?.name ?? '' } }
+      : value;
+    setForm(initial); setError(''); setDialog(type);
+  }
+  function openOwnClubProfile(targetClub) {
+    const own = targetClub.members.find(member => member.mine);
+    if (own && !own.active) { setNotice('비활성 회원은 정보를 수정할 수 없습니다. 모임장에게 문의해 주세요.'); return; }
+    setClubId(targetClub.id);
+    openDialog('member', { ...blankMember, ...(own ?? { name: user.name }), ownProfile: true });
   }
   function openNewMember() {
-    const sportType = sportCode(club.sport);
-    const profile = user && sportProfiles[sportType];
-    const hasOwnMember = club.members.some(member => member.mine);
-    openDialog('member', profile && !hasOwnMember
-      ? { ...blankMember, ...profile, age: profile.age ?? '', notes: profile.notes ?? '', fromMyProfile: true }
-      : { ...blankMember });
+    openDialog('member', { ...blankMember, ...(!isManager && user ? { name: user.name, ownProfile: true } : {}) });
   }
   function closeDialog() { setDialog(null); setError(''); }
-  function saveSportProfile(e) {
-    e.preventDefault();
-    const rating = Number(form.rating), age = form.age === '' || form.age == null ? null : Number(form.age);
-    if (!form.name?.trim() || !form.position?.trim()) return setError('이름과 포지션을 입력해 주세요.');
-    if (!Number.isInteger(rating) || rating < 1 || rating > 100 || (age !== null && (!Number.isInteger(age) || age < 0 || age > 130))) return setError('능력치와 나이를 확인해 주세요.');
-    return serverOperation(async () => {
-      const saved = await api(`/api/users/me/sport-profiles/${form.sportType}`, { method: 'PUT', body: JSON.stringify({ name: form.name.trim(), position: form.position.trim(), rating, age, notes: form.notes?.trim() || null }) });
-      setSportProfiles(old => ({ ...old, [saved.sportType]: saved })); closeDialog(); setNotice(`${sports[saved.sportType]} 내 정보를 저장했습니다.`);
-    });
-  }
   function saveClub(e) {
     e.preventDefault();
     if (!form.name?.trim() || !form.sport) return setError('모임 이름과 종목을 입력해 주세요.');
+    const profile = form.ownerProfile;
+    if (!form.id) {
+      const age = profile?.age === '' || profile?.age == null ? null : Number(profile.age);
+      const rating = Number(profile?.rating);
+      if (!profile?.name?.trim() || !profile?.position?.trim()) return setError('모임장의 이름과 포지션을 입력해 주세요.');
+      if (!Number.isInteger(rating) || rating < 1 || rating > 100 || (age !== null && (!Number.isInteger(age) || age < 0 || age > 130))) return setError('모임장의 능력치와 나이를 확인해 주세요.');
+    }
     if (user) return serverOperation(async () => {
-      await api(form.id ? `/api/clubs/${form.id}` : '/api/clubs', { method: form.id ? 'PUT' : 'POST', body: JSON.stringify({ name: form.name.trim(), sportType: sportCode(form.sport) }) });
-      setClubs(await loadServerClubs()); closeDialog();
+      const payload = { name: form.name.trim(), sportType: sportCode(form.sport) };
+      if (!form.id) payload.ownerProfile = { name: profile.name.trim(), position: profile.position.trim(), rating: Number(profile.rating), age: profile.age === '' || profile.age == null ? null : Number(profile.age), notes: profile.notes?.trim() || null };
+      await api(form.id ? `/api/clubs/${form.id}` : '/api/clubs', { method: form.id ? 'PUT' : 'POST', body: JSON.stringify(payload) });
+      closeDialog();
+      try { setClubs(await loadServerClubs()); }
+      catch { setNotice('저장되었지만 모임 목록을 불러오지 못했습니다. 새로고침해 주세요.'); }
     });
-    if (persistClubs([...clubs, { id: uid(), name: form.name.trim(), sport: form.sport, members: [], matches: [] }])) closeDialog();
+    const member = { ...profile, id: uid(), name: profile.name.trim(), position: profile.position.trim(), rating: Number(profile.rating), age: profile.age === '' || profile.age == null ? '' : Number(profile.age), notes: profile.notes?.trim() ?? '', active: true, mine: true };
+    if (persistClubs([...clubs, { id: uid(), name: form.name.trim(), sport: form.sport, members: [member], matches: [] }])) closeDialog();
   }
   function saveMember(e) {
     e.preventDefault();
@@ -276,7 +292,7 @@ export default function Home() {
     if (user) return serverOperation(async () => {
       const payload = { name: form.name.trim(), position: form.position.trim(), rating, age, notes: form.notes?.trim() || null };
       const path = `/api/clubs/${clubId}/members`;
-      if (!isManager || form.fromMyProfile) {
+      if (!isManager || form.ownProfile) {
         await api(`${path}/me`, { method: 'PUT', body: JSON.stringify(payload) });
       } else if (form.id) {
         await api(`${path}/${form.id}`, { method: 'PUT', body: JSON.stringify(payload) });
@@ -316,14 +332,29 @@ export default function Home() {
       if (analysisRequestId.current === requestId) setAnalysisStatus('unavailable');
     }
   }
-  function generate() {
+  async function handleGenerate() {
+    if (generatingRef.current) return;
     const players = activeMembers.filter(p => attendees.includes(p.id));
     if (players.length < teamCount) return setNotice('각 팀에 한 명 이상 배정할 수 있도록 참석자를 선택해 주세요.');
-    if (user) return serverOperation(async () => {
-      const result = await api(`/api/clubs/${clubId}/team-assignments`, { method: 'POST', body: JSON.stringify({ memberIds: attendees, teamCount, conditionText: conditionText.trim() || null }) });
-      setTeams(teamPlayers(result)); setInterpretedConditions(result.interpretedConditions ?? []); confirmationId.current = uid(); setSwap(null); setNotice(''); setScreen('result');
-      analyzeAssignment(result, attendees);
-    });
+    if (user) {
+      const requestId = ++generationRequestId.current;
+      analysisRequestId.current++;
+      generatingRef.current = true; setGenerating(true); setGenerationElapsed(0); setNotice('');
+      const started = elapsedClock();
+      const timer = setInterval(() => { if (generationRequestId.current === requestId) setGenerationElapsed(Math.min(5000, elapsedClock() - started)); }, 100);
+      try {
+        const result = await api(`/api/clubs/${clubId}/team-assignments`, { method: 'POST', body: JSON.stringify({ memberIds: attendees, teamCount, conditionText: conditionText.trim() || null }) });
+        if (generationRequestId.current !== requestId) return;
+        setTeams(teamPlayers(result)); setInterpretedConditions(result.interpretedConditions ?? []); setBalanceLimited(result.balanceLimited); confirmationId.current = uid(); setSwap(null); setNotice(''); setScreen('result');
+        analyzeAssignment(result, attendees);
+      } catch (failure) {
+        if (generationRequestId.current === requestId) setNotice(failure.message);
+      } finally {
+        clearInterval(timer);
+        if (generationRequestId.current === requestId) { generatingRef.current = false; setGenerating(false); }
+      }
+      return;
+    }
     analysisRequestId.current++; setAnalysis(null); setAnalysisStatus('guest');
     setTeams(assign(players, teamCount)); setInterpretedConditions([]); setSwap(null); setNotice(''); setScreen('result');
   }
@@ -334,7 +365,7 @@ export default function Home() {
       const result = await api(`/api/clubs/${clubId}/team-assignments/swap`, { method: 'POST', body: JSON.stringify({
         ...roster(), firstMemberId: teams[swap.teamIndex][swap.memberIndex].id, secondMemberId: teams[teamIndex][memberIndex].id, conditionText: conditionText.trim() || null,
       }) });
-      setTeams(teamPlayers(result)); setInterpretedConditions(result.interpretedConditions ?? []); confirmationId.current = uid(); setSwap(null);
+      setTeams(teamPlayers(result)); setInterpretedConditions(result.interpretedConditions ?? []); setBalanceLimited(false); confirmationId.current = uid(); setSwap(null);
       analyzeAssignment(result, attendees);
     });
     setTeams(old => { const next = old.map(t => [...t]); [next[swap.teamIndex][swap.memberIndex], next[teamIndex][memberIndex]] = [next[teamIndex][memberIndex], next[swap.teamIndex][swap.memberIndex]]; return next; }); setSwap(null);
@@ -349,8 +380,8 @@ export default function Home() {
     const match = { id: uid(), date: new Date().toISOString(), sport: club.sport, teams: snapshot };
     if (updateClub(c => ({ ...c, matches: [match, ...c.matches] }))) { setScreen('history'); setNotice('경기 기록을 이 브라우저에 저장했습니다.'); }
   }
-  const back = () => { if (user && screen === 'match') return openHistory(); setNotice(''); setScreen(({ clubs: 'welcome', detail: 'clubs', members: 'detail', formation: 'detail', result: 'formation', history: 'detail', match: 'history', guide: 'clubs', my: 'clubs' })[screen] ?? 'clubs'); };
-  const title = ({ detail: club?.name, members: '회원 관리', formation: '팀 나누기', result: '팀 편성 결과', history: '경기 기록', match: '경기 상세', guide: '설명서', my: '내 계정', invitation: '모임 초대' })[screen];
+  const back = () => { if (user && screen === 'match') return openHistory(); setNotice(''); setScreen(({ clubs: 'welcome', detail: 'clubs', attendance: 'detail', members: 'detail', formation: 'detail', result: 'formation', history: 'detail', match: 'history', guide: 'clubs', my: 'clubs' })[screen] ?? 'clubs'); };
+  const title = ({ detail: club?.name, attendance: '운동 일정 투표', members: '회원 관리', formation: '팀 나누기', result: '팀 편성 결과', history: '경기 기록', match: '경기 상세', guide: '설명서', my: '내 계정', invitation: '모임 초대' })[screen];
   return <div className="shell">
     <aside className="desktop-brand"><div className="brand">TEAM <span>/</span> UP</div><div className="side-line"/><p>함께 뛰는 시간,<br/><strong>더 좋은 팀을 만듭니다.</strong></p><small>모임부터 경기 기록까지<br/>당신의 다음 경기를 준비하세요.</small><div className="side-footer">PLAY TOGETHER · PLAY BETTER</div></aside>
     <div className="app" aria-busy={busy} style={busy ? { pointerEvents: 'none', opacity: .7 } : undefined}>
@@ -358,16 +389,18 @@ export default function Home() {
       <main className={screen === 'welcome' ? 'welcome' : 'content'}>
         {storageError && !dialog && <p className="error" role="alert">{storageError}</p>}
         {pendingInvite && screen !== 'invitation' && <div className="invite-card"><strong>모임 초대</strong><p>{user ? '진행 중인 모임 초대가 있습니다.' : '초대된 모임에 가입하려면 먼저 로그인하세요.'}</p>{user && <button type="button" className="primary" onClick={() => setScreen('invitation')}>초대 계속하기</button>}<button type="button" className="text-button" onClick={cancelInvitation}>초대 닫기</button></div>}
-        {screen === 'invitation' && user && pendingInvite && <InvitationOnboarding key={user.id + ':' + pendingInvite} token={pendingInvite} user={user} onComplete={completeInvitation} onLoginRequired={invitationLoginRequired} onCancel={cancelInvitation} onProfileSaved={profile => setSportProfiles(old => ({ ...old, [profile.sportType]: profile }))} onNotice={setModalNotice} />}
-        {screen === 'welcome' && <><section className="hero"><div className="red-line"/><div className="brand light">TEAM <span>/</span> UP</div><div className="hero-copy"><div className="eyebrow">MAKE YOUR GAME BETTER</div><h1>좋은 경기는<br/>균형 잡힌 팀에서<span>.</span></h1><p>모이고, 나누고, 함께 즐겨요.</p></div><Image className="logo" src="/teamup-logo.png" alt="TEAM UP 엠블럼" width={100} height={100} priority /></section><section className="intro"><div className="eyebrow blue">READY TO PLAY?</div><h2>우리의 다음 경기를 시작해요</h2><p>모임과 선수 명단을 한 곳에서 관리하세요.</p><div className="social-logins">{['kakao'].map(provider => <a className={'social-login social-login--' + provider} key={provider} href={'/oauth2/authorization/' + provider}><span className="social-icon"><SocialIcon provider={provider} /></span><span>{({google:'Google',kakao:'카카오',naver:'네이버'})[provider]}로 계속하기</span></a>)}</div></section></>}
+        {screen === 'invitation' && user && pendingInvite && <InvitationOnboarding key={user.id + ':' + pendingInvite} token={pendingInvite} user={user} onComplete={completeInvitation} onLoginRequired={invitationLoginRequired} onCancel={cancelInvitation} />}
+        {screen === 'welcome' && <><section className="hero"><div className="red-line"/><div className="brand light">TEAM <span>/</span> UP</div><div className="hero-copy"><div className="eyebrow">MAKE YOUR GAME BETTER</div><h1>좋은 경기는<br/>균형 잡힌 팀에서<span>.</span></h1><p>모이고, 나누고, 함께 즐겨요.</p></div><Image className="logo" src="/teamup-logo.png" alt="TEAM UP 엠블럼" width={100} height={100} priority /></section><section className="intro"><div className="eyebrow blue">READY TO PLAY?</div><h2>우리의 다음 경기를 시작해요</h2><p>모임과 선수 명단을 한 곳에서 관리하세요.</p><div className="social-logins">{['kakao', 'naver'].map(provider => <a className={'social-login social-login--' + provider} key={provider} href={'/oauth2/authorization/' + provider}><span className="social-icon"><SocialIcon provider={provider} /></span><span>{({google:'Google',kakao:'카카오',naver:'네이버'})[provider]}로 계속하기</span></a>)}</div></section></>}
         {screen === 'guide' && <UserGuide />}
         {screen === 'clubs' && <><div className="heading"><div className="eyebrow blue">YOUR COMMUNITY</div><h2>내 모임</h2><p>함께 뛰는 모임을 선택해 주세요</p></div><div className="stack">{clubs.map((c, i) => <button key={c.id} className={'club-card ' + (i === 0 ? 'featured' : '')} onClick={() => { setClubId(c.id); setScreen('detail');}}><div className="club-top"><span className="club-icon">{c.sport[0]}</span><span className="eyebrow">{c.sport.toUpperCase()} CLUB</span><span className="arrow">↗</span></div><strong>{c.name}</strong><small>{c.sport} <i>·</i> 등록 회원 {user ? c.activeMemberCount : c.members.filter(m => m.active).length}명</small></button>)}<button className="outline-action" onClick={() => openDialog('club', { name: '', sport: '농구' })}>＋ &nbsp;새 모임 만들기</button></div></>}
-        {screen === 'my' && <><div className="heading"><div className="eyebrow blue">MY ACCOUNT</div><h2>{user ? user.name : '게스트'}</h2><p>{user ? '가입한 모임과 내 정보를 확인하세요.' : '이 브라우저에서 게스트로 사용 중입니다.'}</p></div>{user ? <><div className="section-heading"><div><div className="eyebrow blue">MY SPORTS</div><h2>종목별 내 정보</h2></div></div><p className="help">저장한 정보는 같은 종목의 모임에서 내 회원 정보를 추가할 때 입력됩니다.</p><div className="stack compact">{Object.entries(sports).map(([code, label]) => <button key={code} className="member-card" onClick={() => openMySportProfile(code)}><span className="avatar">{label[0]}</span><span className="member-name"><strong>{label}</strong><small>{sportProfiles[code] ? `${sportProfiles[code].position} · ${formatRating(sportProfiles[code].rating, code, ' / 10')}` : "정보 등록"}</small></span><span className="chevron">›</span></button>)}</div><div className="section-heading"><div><div className="eyebrow blue">MY CLUBS</div><h2>가입한 모임</h2></div></div><div className="stack compact">{clubs.map(c => <button key={c.id} className="member-card" onClick={() => {  setClubId(c.id); setScreen('detail'); }}><span className="avatar">{c.name[0]}</span><span className="member-name"><strong>{c.name}</strong><small>{c.ownerId === user.id ? '관리자 · 모임 관리' : c.members.some(m => m.mine) ? '멤버 · 내 정보 보기' : '멤버 · 내 정보 등록'}</small></span><span className="chevron">›</span></button>)}{clubs.length === 0 && <div className="empty">가입한 모임이 없습니다.</div>}</div><button className="secondary my-logout" onClick={logout}>로그아웃</button></> : <><p className="help">게스트 모임은 이 브라우저에만 저장됩니다.</p><button className="secondary my-logout" onClick={() => setScreen('welcome')}>로그인 화면으로 이동</button></>}</>}
-        {screen === 'detail' && !isManager && <><div className="meta">{club.sport} CLUB · 참여 멤버</div><div className="section-heading"><div><div className="eyebrow blue">MY PROFILE</div><h2>내 정보</h2></div></div>{myProfile ? <button className="member-card" disabled={!myProfile.active} onClick={() => openDialog('member', {...myProfile})}><span className="avatar">{myProfile.name[0]}</span><span className="member-name"><strong>{myProfile.name}</strong><small>{myProfile.position} · {formatRating(myProfile.rating, sportCode(club.sport))}{!myProfile.active && ' · 비활성'}</small></span><span className="chevron">›</span></button> : <button className="primary" onClick={openNewMember}>내 정보 등록</button>}<p className="help">이 모임에서는 자신의 정보만 등록하거나 수정할 수 있습니다.</p><div className="section-heading"><div><div className="eyebrow blue">THE ROSTER</div><h2>멤버 목록</h2></div></div><div className="stack compact">{activeMembers.map(member => <div className="member-card" key={member.id}><span className="avatar">{member.name[0]}</span><span className="member-name"><strong>{member.name}{member.mine && ' (나)'}</strong><small>{member.position}</small></span><span className="rating">{formatRating(member.rating, sportCode(club.sport), ' / 10')}</span></div>)}{!activeMembers.length && <div className="empty">등록된 멤버가 없습니다.</div>}</div><button className="secondary import-button" onClick={openHistory}>경기 기록 보기</button></>}
-        {screen === 'detail' && isManager && <><div className="meta">{club.sport} CLUB <span>/</span> 등록 회원 {activeMembers.length}명</div>{user && <><ClubInvitationPanel key={club.id} clubId={club.id} onNotice={setNotice} onCopied={copiedInvitation} /></>}<div className="battle"><div className="eyebrow">READY FOR</div><h2>YOUR NEXT<br/>BATTLE<span>.</span></h2><p>오늘은 어떤 팀으로 뛸까요?</p><div className="battle-mark">✳</div></div><div className="section-heading"><div><div className="eyebrow blue">CLUB MENU</div><h2>무엇을 할까요?</h2></div><small>SELECT MENU</small></div><div className="stack">{[['01','팀 나누기','참석자를 선택하고 팀을 구성해요','formation'],['02','회원 관리','선수 정보와 능력치를 관리해요','members'],['03','이전 경기 기록','지난 팀 편성과 경기 결과를 확인해요','history']].map(([n,t,d,fn]) => <button className="menu-card" key={n} onClick={() => { if (fn === 'formation') startFormation(); else if (fn === 'history') openHistory(); else { setQuery(''); setScreen('members'); } }}><span className="number">{n}</span><span><strong>{t}</strong><small>{d}</small></span><span className="chevron">→</span></button>)}</div>{user && <button className="secondary club-edit-button" onClick={() => openDialog('club', {id: club.id, name: club.name, sport: club.sport})}>모임 정보 수정</button>}</>}
-        {screen === 'members' && <><div className="meta">{club.name} <span>·</span> 활성 회원 {activeMembers.length}명</div><button className="secondary import-button" onClick={() => setImportOpen(true)}>Excel로 회원 추가</button><input className="search" placeholder="⌕  이름으로 검색" value={query} onChange={e => setQuery(e.target.value)} aria-label="회원 이름 검색"/><div className="section-heading"><div><div className="eyebrow blue">THE ROSTER</div><h2>선수 명단</h2></div><button className="text-button" onClick={openNewMember}>＋ 회원 추가</button></div><div className="stack compact">{club.members.filter(m => m.name.includes(query)).map(m => <button key={m.id} className={'member-card ' + (!m.active ? 'inactive' : '')} onClick={() => openDialog('member', {...m})}><span className="avatar">{m.name[0]}</span><span className="member-name"><strong>{m.name} {!m.active && <em>비활성</em>}</strong><small>{m.position}</small></span><span className="rating">{formatRating(m.rating, sportCode(club.sport), ' / 10')}</span><span className="chevron">›</span></button>)}{!club.members.filter(m => m.name.includes(query)).length && <div className="empty">표시할 선수가 없습니다.</div>}</div></>}
-        {screen === 'formation' && <><div className="meta">참석자와 편성 조건을 선택해 주세요</div><div className="section-heading"><div><div className="eyebrow blue">01 / TEAM SETUP</div><h2>팀 수</h2></div></div><div className="stepper"><button aria-label="팀 수 줄이기" disabled={teamCount <= 2} onClick={() => setTeamCount(n => n-1)}>−</button><strong>{teamCount} <small>팀</small></strong><button aria-label="팀 수 늘리기" disabled={teamCount >= 10} onClick={() => setTeamCount(n => n+1)}>＋</button></div><div className="section-heading"><div><div className="eyebrow blue">02 / SELECT PLAYERS</div><h2>참석자 선택</h2></div><span className="selected-count">{attendees.length}명 선택</span></div><div className="stack compact">{activeMembers.map(m => <label className="select-card" key={m.id}><input type="checkbox" checked={attendees.includes(m.id)} onChange={e => setAttendees(old => e.target.checked ? [...old,m.id] : old.filter(id => id !== m.id))}/><strong>{m.name}</strong><small>{m.position} · {formatRating(m.rating, sportCode(club.sport))}</small></label>)}{!activeMembers.length && <div className="empty">회원 관리에서 선수를 먼저 추가해 주세요.</div>}</div><div className="section-heading"><div><div className="eyebrow blue">03 / CONDITIONS</div><h2>추가 조건 <small>선택</small></h2></div></div>{user ? <><textarea className="conditions-input" maxLength={500} value={conditionText} onChange={e => setConditionText(e.target.value)} placeholder={conditionExample} aria-label="팀 편성 조건" /><p className="help">한 줄에 하나씩 최대 5개. 같은 팀·다른 팀 조건에는 참석 선수의 이름 2명을 정확히 입력하세요.</p></> : <div className="disabled-box">자연어 조건은 로그인 모드에서 사용할 수 있습니다.</div>}{notice && <p className="error" role="alert">{notice}</p>}<button className="primary bottom-action" onClick={() => generate()}>팀 나누기 <span>→</span></button><p className="help">미리보기는 능력치 중심의 간단한 편성으로, 최적해를 보장하지 않습니다. 동일한 입력은 동일한 서버 결과를 반환합니다.</p></>}
-        {screen === 'result' && <><div className="meta">다른 팀의 선수를 차례로 선택해 교환하세요</div><div className="balance"><span>{isLol(sportCode(club.sport)) ? '평균 티어 점수 차이' : '평균 능력치 차이'}</span><strong>{displayRating(Math.max(...teams.map(average))-Math.min(...teams.map(average))).toFixed(1)} <small>POINTS</small></strong></div>{isLol(sportCode(club.sport)) && <p className="help">티어를 아이언 1점~챌린저 10점으로 환산한 팀 편성용 점수입니다.</p>}<div className="stack">{teams.map((team, i) => <section className={'team-card tone-'+(i%2)} key={i}><div className="team-header"><div><div className="eyebrow">LINEUP {String(i+1).padStart(2,'0')}</div><h2>TEAM {String.fromCharCode(65+i)}</h2></div><div className="team-score"><strong>{displayRating(average(team)).toFixed(1)}</strong><small>{isLol(sportCode(screen === 'match' ? historyItem.sport : club.sport)) ? '평균 티어 점수' : '평균'} · 총점 {displayRating(team.reduce((s,p)=>s+p.rating,0))}</small></div></div>{team.map((p,j) => <button className={'team-player '+(swap?.teamIndex===i && swap?.memberIndex===j?'chosen':'')} key={p.id} onClick={() => swapMember(i,j)}><strong>{p.name}</strong><span>{p.position}</span><b>{formatRating(p.rating, sportCode(club.sport))}</b></button>)}<TeamInsight team={team} insight={analysis?.find(item => item.teamNumber === i + 1)} status={analysisStatus} /></section>)}</div>{interpretedConditions.length > 0 && <p className="help">적용한 조건: {interpretedConditions.join(' · ')}</p>}{swap && <p className="help">교환할 다른 팀의 선수를 선택해 주세요.</p>}<div className="button-row"><button className="secondary" onClick={() => generate()}>다시 나누기</button><button className="secondary" onClick={() => setSwap(null)}>선택 취소</button></div><button className="primary" onClick={() => saveMatch()}>결과 확정하기 <span>→</span></button><p className="help">{user ? '확정 시 서버에서 다시 검증하고 경기 기록으로 저장합니다.' : '확정 결과는 이 브라우저에만 저장됩니다.'}</p></>}
+        {screen === 'my' && <><div className="heading"><div className="eyebrow blue">MY ACCOUNT</div><h2>{user ? user.name : '게스트'}</h2><p>{user ? '가입한 모임과 내 정보를 확인하세요.' : '이 브라우저에서 게스트로 사용 중입니다.'}</p></div>{user ? <><div className="section-heading"><div><div className="eyebrow blue">MY CLUBS</div><h2>가입한 모임</h2></div></div><div className="stack compact">{clubs.map(c => <div key={c.id} className="my-club"><button className="member-card" onClick={() => { setClubId(c.id); setScreen('detail'); }}><span className="avatar">{c.name[0]}</span><span className="member-name"><strong>{c.name}</strong><small>{c.sport} · {c.ownerId === user.id ? '모임장' : '모임원'}</small></span><span className="chevron">›</span></button><hr className="my-club-divider" /><button type="button" className="text-button my-club-profile" onClick={() => openOwnClubProfile(c)}>{c.members.some(m => m.mine) ? '모임에서의 내 정보 수정하기' : '모임에서의 내 정보 등록하기'}</button></div>)}{clubs.length === 0 && <div className="empty">가입한 모임이 없습니다.</div>}</div><button className="secondary my-logout" onClick={logout}>로그아웃</button></> : <><p className="help">게스트 모임은 이 브라우저에만 저장됩니다.</p><button className="secondary my-logout" onClick={() => setScreen('welcome')}>로그인 화면으로 이동</button></>}</>}
+        {screen === 'detail' && <button className="menu-card attendance-entry" onClick={() => user ? setScreen('attendance') : setNotice('운동 일정 투표는 로그인 후 사용할 수 있습니다.')}><span className="number">✓</span><span><strong>운동 일정 투표</strong><small>운동 일정과 참석 여부를 확인해요</small></span><span className="chevron">→</span></button>}
+        {screen === 'attendance' && user && <AttendanceVotes key={club.id} clubId={club.id} isManager={isManager} onNotice={setNotice} />}
+        {screen === 'detail' && !isManager && <><div className="meta">{club.sport} CLUB · 참여 멤버</div><div className="section-heading"><div><div className="eyebrow blue">MY PROFILE</div><h2>내 정보</h2></div></div>{myProfile ? <button className="member-card" disabled={!myProfile.active} onClick={() => openDialog('member', {...myProfile})}><span className="avatar">{myProfile.name[0]}</span><span className="member-name"><strong>{myProfile.name}</strong><small>{myProfile.position} · {formatRating(myProfile.rating, sportCode(club.sport))}{!myProfile.active && ' · 비활성'}</small></span><span className="chevron">›</span></button> : <button className="primary" onClick={openNewMember}>내 정보 등록</button>}<p className="help">이 모임에서는 자신의 정보만 등록하거나 수정할 수 있습니다.</p><div className="section-heading"><div><div className="eyebrow blue">THE ROSTER</div><h2>멤버 목록</h2></div></div><div className="stack compact">{club.members.map(member => <button type="button" className="member-card" key={member.id} onClick={() => openDialog(member.mine && member.active ? 'member' : 'memberView', {...member})}><span className="avatar">{member.name[0]}</span><span className="member-name"><strong>{member.name}{member.mine && ' (나)'}</strong><small>{member.position}</small></span><span className="rating">{formatRating(member.rating, sportCode(club.sport), ' / 10')}</span></button>)}{!club.members.length && <div className="empty">등록된 멤버가 없습니다.</div>}</div><button className="secondary import-button" onClick={openHistory}>경기 기록 보기</button></>}
+        {screen === 'detail' && isManager && <><div className="meta">{club.sport} CLUB <span>/</span> 등록 회원 {activeMembers.length}명</div>{user && <><ClubInvitationPanel key={club.id} clubId={club.id} onNotice={setNotice} onCopied={copiedInvitation} /></>}<div className="eyebrow blue">CLUB MENU</div><h2>무엇을 할까요?</h2><small>SELECT MENU</small><div className="stack">{[['01','빠른 팀 편성','등록된 운동 없이도 참석자를 선택하고 팀을 구성해요','formation'],['02','회원 관리','선수 정보와 능력치를 관리해요','members'],['03','이전 경기 기록','지난 팀 편성과 경기 결과를 확인해요','history']].map(([n,t,d,fn]) => <button className="menu-card" key={n} onClick={() => { if (fn === 'formation') startFormation(); else if (fn === 'history') openHistory(); else { setQuery(''); setScreen('members'); } }}><span className="number">{n}</span><span><strong>{t}</strong><small>{d}</small></span><span className="chevron">→</span></button>)}</div>{user && <button className="secondary club-edit-button" onClick={() => openDialog('club', {id: club.id, name: club.name, sport: club.sport})}>모임 정보 수정</button>}</>}
+        {screen === 'members' && <><div className="meta">{club.name} <span>·</span> 활성 회원 {activeMembers.length}명</div>{user && isManager && !myProfile && <button type="button" className="secondary import-button" onClick={() => openOwnClubProfile(club)}>모임장 내 정보 등록</button>}<button className="secondary import-button" onClick={() => setImportOpen(true)}>Excel로 회원 추가</button><input className="search" placeholder="⌕  이름으로 검색" value={query} onChange={e => setQuery(e.target.value)} aria-label="회원 이름 검색"/><div className="section-heading"><div><div className="eyebrow blue">THE ROSTER</div><h2>선수 명단</h2></div><button className="text-button" onClick={openNewMember}>＋ 회원 추가</button></div><div className="stack compact">{club.members.filter(m => m.name.includes(query)).map(m => <button key={m.id} className={'member-card ' + (!m.active ? 'inactive' : '')} onClick={() => openDialog('member', {...m})}><span className="avatar">{m.name[0]}</span><span className="member-name"><strong>{m.name} {!m.active && <em>비활성</em>}</strong><small>{m.position}</small></span><span className="rating">{formatRating(m.rating, sportCode(club.sport), ' / 10')}</span><span className="chevron">›</span></button>)}{!club.members.filter(m => m.name.includes(query)).length && <div className="empty">표시할 선수가 없습니다.</div>}</div></>}
+        {screen === 'formation' && <><div className="meta">참석자와 편성 조건을 선택해 주세요</div><div className="section-heading"><div><div className="eyebrow blue">01 / TEAM SETUP</div><h2>팀 수</h2></div></div><div className="stepper"><button aria-label="팀 수 줄이기" disabled={generating || teamCount <= 2} onClick={() => setTeamCount(n => n-1)}>−</button><strong>{teamCount} <small>팀</small></strong><button aria-label="팀 수 늘리기" disabled={generating || teamCount >= 10} onClick={() => setTeamCount(n => n+1)}>＋</button></div><div className="section-heading"><div><div className="eyebrow blue">02 / SELECT PLAYERS</div><h2>참석자 선택</h2></div><span className="selected-count">{attendees.length}명 선택</span></div><div className="stack compact">{activeMembers.map(m => <label className="select-card" key={m.id}><input type="checkbox" disabled={generating} checked={attendees.includes(m.id)} onChange={e => setAttendees(old => e.target.checked ? [...old,m.id] : old.filter(id => id !== m.id))}/><strong>{m.name}</strong><small>{m.position} · {formatRating(m.rating, sportCode(club.sport))}</small></label>)}{!activeMembers.length && <div className="empty">회원 관리에서 선수를 먼저 추가해 주세요.</div>}</div><div className="section-heading"><div><div className="eyebrow blue">03 / CONDITIONS</div><h2>추가 조건 <small>선택</small></h2></div></div>{user ? <><textarea className="conditions-input" disabled={generating} maxLength={500} value={conditionText} onChange={e => setConditionText(e.target.value)} placeholder={conditionExample} aria-label="팀 편성 조건" /><p className="help">한 줄에 하나씩 최대 5개. 같은 팀·다른 팀 조건에는 참석 선수의 이름 2명을 정확히 입력하세요.</p></> : <div className="disabled-box">자연어 조건은 로그인 모드에서 사용할 수 있습니다.</div>}{notice && <p className="error" role="alert">{notice}</p>}{generating && <div className="generation-progress" role="status"><strong>조건에 맞는 균형 잡힌 팀을 찾고 있어요.</strong><div className="progress-track" role="progressbar" aria-label="요청 경과 시간 (5초 기준)" aria-valuemin={0} aria-valuemax={5} aria-valuenow={Math.min(4.95, generationElapsed / 1000)}><div style={{ width: `${Math.min(99, generationElapsed / 50)}%` }} /></div><p className="help">{generationElapsed < 5000 ? '요청 경과 시간 (탐색 예산 5초 기준)' : '조건 확인과 서버 응답을 기다리고 있어요.'}</p></div>}<button className="primary bottom-action" disabled={generating} onClick={handleGenerate}>팀 나누기 <span>→</span></button><p className="help">제한 시간 안에 후보를 비교하며 최적해를 보장하지 않습니다.</p></>}
+        {screen === 'result' && <>{generating && <div className="generation-progress" role="status"><strong>조건에 맞는 균형 잡힌 팀을 찾고 있어요.</strong><div className="progress-track" role="progressbar" aria-label="요청 경과 시간 (5초 기준)" aria-valuemin={0} aria-valuemax={5} aria-valuenow={Math.min(4.95, generationElapsed / 1000)}><div style={{ width: `${Math.min(99, generationElapsed / 50)}%` }} /></div><p className="help">{generationElapsed < 5000 ? '요청 경과 시간 (탐색 예산 5초 기준)' : '조건 확인과 서버 응답을 기다리고 있어요.'}</p></div>}{user && balanceLimited && <p className="help" role="status">조건상 균형에 한계가 있습니다</p>}<div className="meta">다른 팀의 선수를 차례로 선택해 교환하세요</div><div className="balance"><span>{isLol(sportCode(club.sport)) ? '평균 티어 점수 차이' : '평균 능력치 차이'}</span><strong>{displayRating(Math.max(...teams.map(average))-Math.min(...teams.map(average))).toFixed(1)} <small>POINTS</small></strong></div>{isLol(sportCode(club.sport)) && <p className="help">티어를 아이언 1점~챌린저 10점으로 환산한 팀 편성용 점수입니다.</p>}<div className="stack">{teams.map((team, i) => <section className={'team-card tone-'+(i%2)} key={i}><div className="team-header"><div><div className="eyebrow">LINEUP {String(i+1).padStart(2,'0')}</div><h2>TEAM {String.fromCharCode(65+i)}</h2></div><div className="team-score"><strong>{displayRating(average(team)).toFixed(1)}</strong><small>{isLol(sportCode(screen === 'match' ? historyItem.sport : club.sport)) ? '평균 티어 점수' : '평균'} · 총점 {displayRating(team.reduce((s,p)=>s+p.rating,0))}</small></div></div>{team.map((p,j) => <button className={'team-player '+(swap?.teamIndex===i && swap?.memberIndex===j?'chosen':'')} key={p.id} disabled={generating} onClick={() => swapMember(i,j)}><strong>{p.name}</strong><span>{p.position}</span><b>{formatRating(p.rating, sportCode(club.sport))}</b></button>)}<TeamInsight team={team} insight={analysis?.find(item => item.teamNumber === i + 1)} status={analysisStatus} /></section>)}</div>{interpretedConditions.length > 0 && <p className="help">적용한 조건: {interpretedConditions.join(' · ')}</p>}{swap && <p className="help">교환할 다른 팀의 선수를 선택해 주세요.</p>}<div className="button-row"><button className="secondary" disabled={generating} onClick={handleGenerate}>다시 나누기</button><button className="secondary" onClick={() => setSwap(null)}>선택 취소</button></div><button className="primary" disabled={generating} onClick={() => saveMatch()}>결과 확정하기 <span>→</span></button><p className="help">{user ? '확정 시 서버에서 다시 검증하고 경기 기록으로 저장합니다.' : '확정 결과는 이 브라우저에만 저장됩니다.'}</p></>}
         {screen === 'history' && <><div className="meta">{club.name}의 지난 경기를 모았어요</div><div className="section-heading"><div><div className="eyebrow blue">MATCH ARCHIVE</div><h2>최근 경기</h2></div></div><div className="stack">{club.matches.length === 0 && <div className="empty">아직 저장된 경기 기록이 없습니다.<br/>첫 경기를 만들어 보세요.</div>}{club.matches.map(match => <button key={match.id} className="history-card" onClick={() => openMatch(match)}><small>{new Date(match.date).toLocaleDateString('ko-KR', {year:'numeric',month:'long',day:'numeric'})} · {match.sport}</small><strong>팀 편성 기록 <span>→</span></strong><small>{match.teams ? `참석 ${match.teams.flat().length}명 · ${match.teams.length}개 팀` : '서버 경기 기록'}</small></button>)}</div></>}
         {screen === 'match' && historyItem && <><div className="meta">{new Date(historyItem.date).toLocaleDateString('ko-KR')} · {historyItem.sport}</div><div className="section-heading"><div><div className="eyebrow blue">MATCH LINEUP</div><h2>당시 팀 구성</h2></div></div><div className="stack">{historyItem.teams.map((team,i) => <section className="team-card" key={i}><div className="team-header"><h2>TEAM {String.fromCharCode(65+i)}</h2><div className="team-score"><strong>{displayRating(average(team)).toFixed(1)}</strong><small>{isLol(sportCode(screen === 'match' ? historyItem.sport : club.sport)) ? '평균 티어 점수' : '평균'} · 총점 {displayRating(team.reduce((n,p)=>n+p.rating,0))}</small></div></div>{team.map(p => <div className="team-player" key={p.id}><strong>{p.name}</strong><span>{p.position}</span><b>{formatRating(p.rating, sportCode(historyItem.sport))}</b></div>)}</section>)}</div><p className="help">기록 당시의 회원 정보입니다.</p></>}
       </main>
@@ -376,9 +409,10 @@ export default function Home() {
     </div>
     {modalNotice && <AlertModal key={modalNotice} message={modalNotice} onDismiss={setModalNotice} />}
     {importOpen && <MemberImport sportType={sportCode(club?.sport)} onClose={() => setImportOpen(false)} onSave={saveImportedMembers} busy={busy} saveError={error || storageError} />}
-    {dialog && <div className="overlay" onClick={closeDialog}><section className="modal" role="dialog" aria-modal="true" aria-labelledby="dialog-title" onClick={e => e.stopPropagation()}><div className="modal-heading"><div><div className="eyebrow blue">{dialog === 'club' ? 'NEW CLUB' : dialog === 'sportProfile' ? 'MY SPORT PROFILE' : 'PLAYER PROFILE'}</div><h2 id="dialog-title">{dialog === 'club' ? '새 모임 만들기' : dialog === 'sportProfile' ? `${sports[form.sportType]} 내 정보` : form.id ? '회원 정보 수정' : '새 회원 추가'}</h2></div><button className="close" onClick={closeDialog} aria-label="닫기">×</button></div><form aria-busy={busy} style={busy ? { pointerEvents: 'none' } : undefined} onSubmit={dialog === 'club' ? saveClub : dialog === 'sportProfile' ? saveSportProfile : saveMember}>
-      <label>이름 <b>*</b><input maxLength={40} value={form.name ?? ''} onChange={e => setForm({...form,name:e.target.value})} placeholder={dialog === 'club'?'예: 주말 농구 모임':'선수 이름'} /></label>
-      {dialog === 'club' ? <label>운동 종목 <b>*</b><select value={form.sport ?? '농구'} onChange={e => setForm({...form,sport:e.target.value})}>{['농구','풋살','축구','배구','야구','리그 오브 레전드','기타'].map(s=><option key={s}>{s}</option>)}</select></label> : <><label>포지션 <b>*</b><input maxLength={30} value={form.position ?? ''} onChange={e => setForm({...form,position:e.target.value})} placeholder="예: 가드" /></label><RatingField sportType={dialog === 'sportProfile' ? form.sportType : sportCode(club?.sport)} rating={form.rating} onChange={rating => setForm({...form, rating})} /><label>나이 <small>선택</small><input type="number" min="0" max="130" value={form.age ?? ''} onChange={e => setForm({...form,age:e.target.value})} placeholder="입력 안 함" /></label>{dialog !== 'sportProfile' && !isLol(sportCode(club?.sport)) && <button type="button" className="text-button estimate" onClick={setUnknownRating}>실력을 잘 모르겠어요 · 모임 평균 기준 적용</button>}{dialog !== 'sportProfile' && !isLol(sportCode(club?.sport)) && <p className="help">활성 회원 평균에서 0.5점을 뺀 뒤 1~10 사이 정수로 반올림합니다.</p>}<label>추가 사항 <small>선택</small><textarea maxLength={300} value={form.notes ?? ''} onChange={e => setForm({...form,notes:e.target.value})} placeholder="플레이 스타일 등" /></label>{form.fromMyProfile && <div className="profile-prefill"><p className="help">내 계정의 {club?.sport} 정보가 입력되었습니다. 저장하면 이 모임의 내 선수 정보로 등록됩니다.</p><button type="button" className="text-button" onClick={() => setForm({ ...blankMember })}>{isManager ? '다른 회원 입력' : '직접 입력'}</button></div>}{form.id && isManager && <label className="check-line"><input type="checkbox" disabled={Boolean(user && club?.members.find(m => m.id === form.id)?.active === false)} checked={form.active} onChange={e => setForm({...form,active:e.target.checked})}/> 활동 중인 회원</label>}</>}
+    {dialog === 'memberView' && <div className="overlay" onClick={closeDialog}><section className="modal" role="dialog" aria-modal="true" aria-labelledby="member-view-title" onClick={e => e.stopPropagation()}><div className="modal-heading"><h2 id="member-view-title">선수 정보</h2><button className="close" onClick={closeDialog} aria-label="닫기">×</button></div><p><strong>이름:</strong> {form.name}</p><p><strong>포지션:</strong> {form.position}</p><p><strong>능력치:</strong> {formatRating(form.rating, sportCode(club?.sport))}</p><p><strong>나이:</strong> {form.age === '' || form.age == null ? '미입력' : form.age}</p><p><strong>추가 사항:</strong> {form.notes || '미입력'}</p></section></div>}
+    {dialog && dialog !== 'memberView' && <div className="overlay" onClick={closeDialog}><section className="modal" role="dialog" aria-modal="true" aria-labelledby="dialog-title" onClick={e => e.stopPropagation()}><div className="modal-heading"><div><div className="eyebrow blue">{dialog === 'club' ? 'NEW CLUB' : 'PLAYER PROFILE'}</div><h2 id="dialog-title">{dialog === 'club' ? '새 모임 만들기' : form.id ? '회원 정보 수정' : '새 회원 추가'}</h2></div><button className="close" onClick={closeDialog} aria-label="닫기">×</button></div><form aria-busy={busy} style={busy ? { pointerEvents: 'none' } : undefined} onSubmit={dialog === 'club' ? saveClub : saveMember}>
+      <label>이름 <b>*</b><input maxLength={dialog === 'club' ? 40 : 100} value={form.name ?? ''} onChange={e => setForm({...form,name:e.target.value})} placeholder={dialog === 'club'?'예: 주말 농구 모임':'선수 이름'} /></label>
+      {dialog === 'club' ? <><label>운동 종목 <b>*</b><select value={form.sport ?? '농구'} onChange={e => setForm({...form,sport:e.target.value})}>{['농구','풋살','축구','배구','야구','리그 오브 레전드','기타'].map(s=><option key={s}>{s}</option>)}</select></label>{!form.id && <ClubOwnerProfileFields sport={form.sport} profile={form.ownerProfile} onChange={ownerProfile => setForm({ ...form, ownerProfile })} />}</> : <><label>포지션 <b>*</b><input maxLength={50} value={form.position ?? ''} onChange={e => setForm({...form,position:e.target.value})} placeholder="예: 가드" /></label><RatingField sportType={sportCode(club?.sport)} rating={form.rating} onChange={rating => setForm({...form, rating})} /><label>나이 <small>선택</small><input type="number" min="0" max="130" value={form.age ?? ''} onChange={e => setForm({...form,age:e.target.value})} placeholder="입력 안 함" /></label>{!isLol(sportCode(club?.sport)) && <button type="button" className="text-button estimate" onClick={setUnknownRating}>실력을 잘 모르겠어요 · 모임 평균 기준 적용</button>}{!isLol(sportCode(club?.sport)) && <p className="help">활성 회원 평균에서 0.5점을 뺀 뒤 1~10 사이 정수로 반올림합니다.</p>}<label>추가 사항 <small>선택</small><textarea maxLength={1000} value={form.notes ?? ''} onChange={e => setForm({...form,notes:e.target.value})} placeholder="플레이 스타일 등" /></label>{form.id && isManager && !form.ownProfile && <label className="check-line"><input type="checkbox" disabled={Boolean(user && club?.members.find(m => m.id === form.id)?.active === false)} checked={form.active} onChange={e => setForm({...form,active:e.target.checked})}/> 활동 중인 회원</label>}</>}
       {error && <p className="error" role="alert">{error}</p>}{storageError && <p className="error" role="alert">{storageError}</p>}<button className="primary" type="submit">{dialog === 'club' ? '모임 만들기' : '저장하기'} <span>→</span></button></form></section></div>}
   </div>;
 }

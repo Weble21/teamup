@@ -104,9 +104,7 @@ class ClubMemberService(
         }
         return members.map { member ->
             val own = member.user?.id == ownerId
-            toResponse(member, clubId).let { response ->
-                response.copy(mine = own, age = if (isOwner || own) response.age else null, notes = if (isOwner || own) response.notes else null)
-            }
+            toResponse(member, clubId).copy(mine = own)
         }
     }
 

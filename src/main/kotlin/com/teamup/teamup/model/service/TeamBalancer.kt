@@ -7,11 +7,11 @@ import org.springframework.stereotype.Component
 
 @Component
 class TeamBalancer {
+    internal var clock: () -> Long = System::nanoTime
+    internal var budgetNanos: Long = 5_000_000_000L
     fun balance(participants: List<TeamParticipant>, teamCount: Int, constraints: TeamConstraints): List<List<TeamParticipant>> {
-        if (constraints.together.isEmpty() && constraints.apart.isEmpty() && !constraints.balancePositions) {
-            return balance(participants, teamCount)
-        }
         require(teamCount in 2..participants.size && participants.map { it.memberId }.distinct().size == participants.size)
+        require(participants.all { it.rating in 1..100 })
         val byId = participants.associateBy { it.memberId }
         val parent = participants.associate { it.memberId to it.memberId }.toMutableMap()
         fun root(id: Long): Long {
@@ -37,33 +37,65 @@ class TeamBalancer {
         val teams = List(teamCount) { mutableListOf<TeamParticipant>() }
         val roots = List(teamCount) { mutableSetOf<Long>() }
         val totals = LongArray(teamCount)
-        var visited = 0
-        fun search(index: Int): Boolean {
-            if (index == groups.size) return true
-            if (++visited > 100_000) return false
+        val deadline = clock() + budgetNanos
+        var timedOut = false
+        var best: List<List<TeamParticipant>>? = null
+        var bestScore: CandidateScore? = null
+        val roles = participants.associate { it.memberId to PositionRoles.of(it.position) }
+        fun search(index: Int) {
+            if (clock() - deadline >= 0) { timedOut = true; return }
+            if (index == groups.size) {
+                val score = scoreCandidate(teams, roles)
+                if (bestScore == null || score.betterThan(bestScore!!)) {
+                    bestScore = score
+                    best = teams.map { it.toList() }
+                }
+                return
+            }
             val group = groups[index]
             val choices = teams.indices.filter { team ->
                 teams[team].size + group.players.size <= capacities[team] &&
                     apart.none { (a, b) -> (a == group.root && b in roots[team]) || (b == group.root && a in roots[team]) }
-            }.sortedWith(compareBy<Int> { team ->
-                if (constraints.balancePositions) group.players.sumOf { player ->
-                    val role = PositionRoles.of(player.position)
-                    teams[team].sumOf { member ->
-                        val existing = PositionRoles.of(member.position)
-                        if (existing.specific == role.specific) 4 else if (existing.family == role.family) 1 else 0
-                    }
-                } * 1000 else 0
-            }.thenBy { totals[it] }.thenBy { teams[it].size }.thenBy { it })
+            }.sortedWith(compareBy<Int> { totals[it].toDouble() / maxOf(1, teams[it].size) }.thenBy { teams[it].size }.thenBy { it })
+            val emptyCapacities = mutableSetOf<Int>()
             for (team in choices) {
+                if (teams[team].isEmpty() && !emptyCapacities.add(capacities[team])) continue
                 teams[team].addAll(group.players); roots[team].add(group.root); totals[team] += group.rating
-                if (search(index + 1)) return true
+                search(index + 1)
                 totals[team] -= group.rating; roots[team].remove(group.root)
                 repeat(group.players.size) { teams[team].removeAt(teams[team].lastIndex) }
+                if (timedOut) return
             }
-            return false
         }
-        require(search(0)) { "Cannot satisfy all team conditions" }
-        return teams.map { it.toList() }
+        search(0)
+        if (best == null && timedOut) throw TeamSearchTimeoutException()
+        require(best != null) { "Cannot satisfy all team conditions" }
+        return best!!
+    }
+
+    // Sum pairwise squared differences in team proportions: specific role weight 4, family weight 1.
+    internal fun scoreCandidate(teams: List<List<TeamParticipant>>, roles: Map<Long, com.teamup.teamup.model.team.PositionRole> =
+        teams.flatten().associate { it.memberId to PositionRoles.of(it.position) }): CandidateScore {
+        val averages = teams.map { team -> team.sumOf { it.rating }.toDouble() / team.size / 10.0 }
+        fun imbalance(selector: (com.teamup.teamup.model.team.PositionRole) -> String): Double =
+            roles.values.map(selector).toSet().sumOf { key ->
+                val proportions = teams.map { team -> team.count { selector(roles.getValue(it.memberId)) == key }.toDouble() / team.size }
+                proportions.indices.sumOf { i -> (i + 1 until proportions.size).sumOf { j ->
+                    val diff = proportions[i] - proportions[j]; diff * diff
+                } }
+            }
+        return CandidateScore(averages.max() - averages.min(), 4 * imbalance { it.specific } + imbalance { it.family })
+    }
+
+    internal data class CandidateScore(val difference: Double, val positionPenalty: Double) {
+        fun betterThan(other: CandidateScore): Boolean {
+            val acceptable = difference < 0.8 - 1e-10
+            val otherAcceptable = other.difference < 0.8 - 1e-10
+            if (acceptable != otherAcceptable) return acceptable
+            fun compare(a: Double, b: Double) = when { a < b - 1e-10 -> -1; a > b + 1e-10 -> 1; else -> 0 }
+            val primary = if (acceptable) compare(positionPenalty, other.positionPenalty) else compare(difference, other.difference)
+            return if (primary != 0) primary < 0 else if (acceptable) compare(difference, other.difference) < 0 else compare(positionPenalty, other.positionPenalty) < 0
+        }
     }
 
     private data class Group(val root: Long, val players: List<TeamParticipant>) {
@@ -95,3 +127,5 @@ class TeamBalancer {
         return teams.map { it.toList() }
     }
 }
+
+class TeamSearchTimeoutException : RuntimeException("Team search timed out")

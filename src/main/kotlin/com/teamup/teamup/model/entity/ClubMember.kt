@@ -21,14 +21,22 @@ class ClubMember(
     rating: Int,
     age: Int? = null,
     notes: String? = null,
-    @field:ManyToOne(fetch = FetchType.LAZY)
-    @field:JoinColumn(name = "user_id")
-    val user: User? = null,
+    user: User? = null,
 ) {
     @field:Id
     @field:GeneratedValue(strategy = GenerationType.IDENTITY)
     var id: Long? = null
         protected set
+
+    @field:ManyToOne(fetch = FetchType.LAZY)
+    @field:JoinColumn(name = "user_id")
+    var user: User? = user
+        protected set
+
+    fun linkUser(user: User) {
+        check(this.user == null && active) { "Member is unavailable" }
+        this.user = user
+    }
 
     @field:Column(nullable = false, length = 100)
     var name: String = name.trim()
@@ -77,7 +85,7 @@ class ClubMember(
         require(name.isNotEmpty() && name.length <= 100) { "Member name must contain 1 to 100 characters" }
         require(position.isNotEmpty() && position.length <= 50) { "Position must contain 1 to 50 characters" }
         require(rating in 1..100) { "Rating must be between 1 and 100" }
-        require(age?.let { it >= 0 } ?: true) { "Age must not be negative" }
+        require(age?.let { it in 0..130 } ?: true) { "Age must be between 0 and 130" }
         require((notes?.length ?: 0) <= 1000) { "Notes must not exceed 1000 characters" }
     }
 }

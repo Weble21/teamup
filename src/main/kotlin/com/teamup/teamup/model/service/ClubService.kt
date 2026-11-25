@@ -1,6 +1,7 @@
 package com.teamup.teamup.model.service
 
 import com.teamup.teamup.model.entity.Club
+import com.teamup.teamup.model.entity.ClubMember
 import com.teamup.teamup.model.entity.SportType
 import com.teamup.teamup.model.repository.ClubRepository
 import com.teamup.teamup.model.repository.ClubMemberRepository
@@ -49,11 +50,12 @@ class ClubService(
     }
 
     @Transactional
-    fun create(ownerId: Long, name: String, sportType: SportType): ClubResponse {
+    fun create(ownerId: Long, name: String, sportType: SportType, profile: NewClubMember): ClubResponse {
         val owner = userRepository.findById(ownerId).orElseThrow {
             ResponseStatusException(HttpStatus.NOT_FOUND, "User not found")
         }
         val club = clubRepository.save(Club(owner, name, sportType))
-        return ClubResponse(checkNotNull(club.id), club.name, club.sportType, checkNotNull(owner.id))
+        memberRepository.save(ClubMember(club, profile.name, profile.position, profile.rating, profile.age, profile.notes, owner))
+        return ClubResponse(checkNotNull(club.id), club.name, club.sportType, checkNotNull(owner.id), 1)
     }
 }

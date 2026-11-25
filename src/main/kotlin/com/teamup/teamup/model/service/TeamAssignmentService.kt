@@ -64,8 +64,10 @@ class TeamAssignmentService(
         val participants = members.map { TeamParticipant(it.id, it.name, it.position, it.rating) }
         val conditions = naturalConditions.interpret(conditionText, participants)
         val result = try { teamBalancer.balance(participants, teamCount, conditions) }
-            catch (e: IllegalArgumentException) { throw ResponseStatusException(HttpStatus.BAD_REQUEST, "Team conditions cannot be satisfied", e) }
-        return summarize(clubId, result).copy(interpretedConditions = conditions.descriptions)
+            catch (e: TeamSearchTimeoutException) { throw ResponseStatusException(HttpStatus.BAD_REQUEST, "탐색 시간 안에 조건에 맞는 팀을 찾지 못했습니다. 조건을 줄여 다시 시도해 주세요.", e) }
+            catch (e: IllegalArgumentException) { throw ResponseStatusException(HttpStatus.BAD_REQUEST, "팀 조건이 서로 충돌하거나 인원에 맞지 않습니다.", e) }
+        return summarize(clubId, result).copy(interpretedConditions = conditions.descriptions,
+            balanceLimited = teamBalancer.scoreCandidate(result).difference >= 0.8 - 1e-10)
     }
 
     private fun summarize(clubId: Long, assignment: List<List<TeamParticipant>>): TeamAssignmentResponse {

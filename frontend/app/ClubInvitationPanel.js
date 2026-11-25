@@ -3,12 +3,32 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { api } from './api';
 
+function ConfirmInvitationDialog({ method, onCancel, onConfirm }) {
+  const dialog = useRef(null);
+  const titleId = useId();
+  const descriptionId = useId();
+  const isReissue = method === 'POST';
+
+  useEffect(() => {
+    const element = dialog.current;
+    element.showModal();
+    return () => element.close();
+  }, []);
+
+  return <dialog ref={dialog} className="modal alert-dialog" aria-labelledby={titleId} aria-describedby={descriptionId} onCancel={event => { event.preventDefault(); onCancel(); }}>
+    <h2 id={titleId}>{isReissue ? '새 링크를 발급할까요?' : '링크를 비활성화할까요?'}</h2>
+    <p id={descriptionId}>{isReissue ? '새 링크를 발급하면 이전 링크로는 모임에 가입할 수 없습니다.' : '링크를 비활성화하면 해당 링크로는 모임에 가입할 수 없습니다.'}</p>
+    <div className="button-row"><button type="button" className="secondary" autoFocus onClick={onCancel}>취소</button><button type="button" className="primary" onClick={onConfirm}>{isReissue ? '새 링크 발급' : '비활성화'}</button></div>
+  </dialog>;
+}
+
 export default function ClubInvitationPanel({ clubId, onNotice, onCopied }) {
   const [invitation, setInvitation] = useState(null);
   const [expanded, setExpanded] = useState(true);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [confirmMethod, setConfirmMethod] = useState(null);
   const operation = useRef(false);
   const contentId = useId();
   const path = `/api/clubs/${clubId}/invitation`;
@@ -45,12 +65,13 @@ export default function ClubInvitationPanel({ clubId, onNotice, onCopied }) {
     <div id={contentId} hidden={!expanded} aria-busy={loading || busy}>
       <p>링크를 전달하면 로그인한 사용자가 모임에 가입할 수 있습니다.</p>
       {loading && <p role="status">초대 링크를 불러오는 중입니다.</p>}
-      <div className="button-row"><button type="button" className="secondary" disabled={loading || busy} onClick={() => changeInvitation('POST')}>새 링크 발급</button><button type="button" className="secondary" disabled={loading || busy} onClick={() => changeInvitation('DELETE')}>링크 비활성화</button></div>
+      <div className="button-row"><button type="button" className="secondary" disabled={loading || busy} onClick={() => setConfirmMethod('POST')}>새 링크 발급</button><button type="button" className="secondary" disabled={loading || busy} onClick={() => setConfirmMethod('DELETE')}>링크 비활성화</button></div>
       <small>새 링크를 발급하면 이전 링크는 사용할 수 없습니다.</small>
       {invitation?.requiresReissue && <p className="help">기존 초대 링크는 다시 표시할 수 없습니다. 한 번 새로 발급하면 이후에는 다른 기기에서도 확인할 수 있습니다.</p>}
       {!loading && invitation && !invitation.token && !invitation.requiresReissue && <p className="help">발급된 초대 링크가 없습니다.</p>}
       {invitation?.token && <><input readOnly aria-label="초대 링크" value={`${typeof location === 'undefined' ? '' : location.origin}/#invite=${invitation.token}`} onFocus={e => e.target.select()} /><button type="button" className="text-button invite-copy" onClick={copyInvitation}>링크 복사</button></>}
       {error && <p className="error" role="alert">{error}</p>}
     </div>
+    {confirmMethod && <ConfirmInvitationDialog method={confirmMethod} onCancel={() => setConfirmMethod(null)} onConfirm={() => { const method = confirmMethod; setConfirmMethod(null); changeInvitation(method); }} />}
   </section>;
 }

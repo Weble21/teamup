@@ -1,6 +1,7 @@
 package com.teamup.teamup.controller
 
 import com.teamup.teamup.model.service.ClubInvitationService
+import com.teamup.teamup.model.service.NewClubMember
 import jakarta.validation.Valid
 import jakarta.validation.constraints.Pattern
 import org.springframework.http.HttpStatus
@@ -11,7 +12,8 @@ import org.springframework.security.oauth2.core.user.OAuth2User
 import org.springframework.web.bind.annotation.*
 import org.springframework.web.server.ResponseStatusException
 
-data class JoinInvitationRequest(@field:Pattern(regexp = "[A-Za-z0-9_-]{43}") val token: String)
+data class JoinInvitationRequest(@field:Pattern(regexp = "[A-Za-z0-9_-]{43}") val token: String,
+    val memberId: Long? = null, @field:Valid val profile: UpdateClubMemberRequest? = null)
 data class InvitationResponse(val token: String)
 @RestController
 @RequestMapping("/api")
@@ -35,7 +37,8 @@ class ClubInvitationController(private val service: ClubInvitationService) {
 
     @PostMapping("/invitations/join")
     fun join(@AuthenticationPrincipal principal: OAuth2User?, @Valid @RequestBody request: JoinInvitationRequest) =
-        ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(service.join(userId(principal), request.token))
+        ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(service.join(userId(principal), request.token, request.memberId,
+            request.profile?.let { NewClubMember(it.name, it.position, it.rating, it.age, it.notes) }))
 
     private fun userId(principal: OAuth2User?): Long = principal?.name?.toLongOrNull()?.takeIf { it > 0 }
         ?: throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "Authentication required")

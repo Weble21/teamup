@@ -16,6 +16,7 @@ data class CreateClubMemberRequest(
     @field:Max(100)
     val rating: Int,
     @field:Min(0)
+    @field:Max(130)
     val age: Int? = null,
     @field:Size(max = 1000)
     val notes: String? = null,

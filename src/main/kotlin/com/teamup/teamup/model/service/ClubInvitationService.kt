@@ -7,11 +7,11 @@ import com.teamup.teamup.model.repository.ClubInvitationRepository
 import com.teamup.teamup.model.repository.ClubMembershipRepository
 import com.teamup.teamup.model.repository.ClubRepository
 import com.teamup.teamup.model.repository.UserRepository
-import com.teamup.teamup.model.repository.UserSportProfileRepository
 import com.teamup.teamup.model.repository.ClubMemberRepository
 import com.teamup.teamup.view.InvitationDetailsResponse
 import com.teamup.teamup.view.InvitationPreviewResponse
 import com.teamup.teamup.view.InvitationJoinResponse
+import com.teamup.teamup.view.InvitationCandidate
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -28,7 +28,6 @@ class ClubInvitationService(
     private val invitations: ClubInvitationRepository,
     private val memberships: ClubMembershipRepository,
     private val users: UserRepository,
-    private val sportProfiles: UserSportProfileRepository,
     private val members: ClubMemberRepository,
 ) {
     private val random = SecureRandom()
@@ -68,13 +67,14 @@ class ClubInvitationService(
         val club = invitation.club
         val clubId = checkNotNull(club.id)
         val joined = club.owner.id == userId || memberships.existsByClubIdAndUserId(clubId, userId)
-        return InvitationPreviewResponse(clubId, club.name, club.sportType, joined,
-            sportProfiles.findByUserIdAndSportType(userId, club.sportType) != null)
+        val candidates = if (joined) emptyList() else members.findAllByClubIdAndActiveTrueAndUserIsNullOrderByNameAscIdAsc(clubId)
+            .map { InvitationCandidate(checkNotNull(it.id), it.name, it.position) }
+        return InvitationPreviewResponse(clubId, club.name, club.sportType, joined, candidates)
     }
 
     // A waiter must see membership committed by the previous club-lock holder.
     @Transactional(isolation = Isolation.READ_COMMITTED)
-    fun join(userId: Long, token: String): InvitationJoinResponse {
+    fun join(userId: Long, token: String, memberId: Long?, profile: NewClubMember?): InvitationJoinResponse {
         val tokenHash = hash(token)
         val candidate = invitations.findByTokenHash(tokenHash)
             ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "Invitation not found")
@@ -87,13 +87,21 @@ class ClubInvitationService(
         if (club.owner.id == userId || memberships.existsByClubIdAndUserId(clubId, userId)) {
             return InvitationJoinResponse(clubId, true)
         }
-        val profile = sportProfiles.findByUserIdAndSportType(userId, club.sportType)
-            ?: throw ResponseStatusException(HttpStatus.CONFLICT, "해당 종목의 내 정보를 먼저 등록해 주세요.")
+        if ((memberId == null) == (profile == null) || (memberId != null && memberId <= 0))
+            throw ResponseStatusException(HttpStatus.BAD_REQUEST, "Select a player or provide a profile")
         val user = users.findById(userId).orElseThrow { ResponseStatusException(HttpStatus.UNAUTHORIZED, "User not found") }
-        memberships.save(ClubMembership(club, user))
-        if (members.findByClubIdAndUserId(clubId, userId) == null) {
-            members.save(ClubMember(club, profile.name, profile.position, profile.rating, profile.age, profile.notes, user))
+        if (members.findByClubIdAndUserId(clubId, userId) != null)
+            throw ResponseStatusException(HttpStatus.CONFLICT, "User already has a club profile")
+        if (memberId != null) {
+            val member = members.findForUpdate(memberId, clubId)
+                ?: throw ResponseStatusException(HttpStatus.CONFLICT, "Player is unavailable")
+            if (!member.active || member.user != null) throw ResponseStatusException(HttpStatus.CONFLICT, "Player is unavailable")
+            member.linkUser(user)
+        } else {
+            val input = checkNotNull(profile)
+            members.save(ClubMember(club, input.name, input.position, input.rating, input.age, input.notes, user))
         }
+        memberships.save(ClubMembership(club, user))
         return InvitationJoinResponse(clubId, false)
     }
 

@@ -3,6 +3,7 @@ package com.teamup.teamup
 import com.teamup.teamup.model.entity.*
 import com.teamup.teamup.model.repository.*
 import com.teamup.teamup.model.service.ClubInvitationService
+import com.teamup.teamup.model.service.NewClubMember
 import com.teamup.teamup.view.InvitationJoinResponse
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
@@ -21,7 +22,6 @@ import kotlin.test.*
 class InvitationMySqlConcurrencyTests {
     @Autowired lateinit var users: UserRepository
     @Autowired lateinit var clubs: ClubRepository
-    @Autowired lateinit var profiles: UserSportProfileRepository
     @Autowired lateinit var invitations: ClubInvitationService
     @Autowired lateinit var jdbc: JdbcTemplate
     private val userIds = mutableListOf<Long>()
@@ -36,7 +36,6 @@ class InvitationMySqlConcurrencyTests {
             jdbc.update("DELETE FROM clubs WHERE id = ?", id)
         }
         for (id in userIds) {
-            jdbc.update("DELETE FROM user_sport_profiles WHERE user_id = ?", id)
             jdbc.update("DELETE FROM users WHERE id = ?", id)
         }
     }
@@ -48,12 +47,11 @@ class InvitationMySqlConcurrencyTests {
         val member = users.save(User("Invitation concurrency test player")).also { userIds.add(it.id!!) }
         val club = clubs.save(Club(owner, "Invitation concurrency test", SportType.FUTSAL))
         clubId = club.id!!
-        profiles.saveAndFlush(UserSportProfile(member, SportType.FUTSAL, "Test player", "FW", 70, null, null))
         val token = invitations.issue(owner.id!!, club.id!!)
         val start = CountDownLatch(1); val pool = Executors.newFixedThreadPool(4)
         try {
             val futures = (1..4).map {
-                pool.submit<InvitationJoinResponse> { start.await(); invitations.join(member.id!!, token) }
+                pool.submit<InvitationJoinResponse> { start.await(); invitations.join(member.id!!, token, null, NewClubMember("Test player", "FW", 70, null, null)) }
             }
             start.countDown()
             val results = futures.map { it.get(15, TimeUnit.SECONDS) }

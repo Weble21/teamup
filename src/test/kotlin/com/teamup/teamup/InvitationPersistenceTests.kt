@@ -1,9 +1,11 @@
 package com.teamup.teamup
 
 import com.teamup.teamup.model.entity.Club
+import com.teamup.teamup.model.entity.ClubMember
 import com.teamup.teamup.model.entity.SportType
 import com.teamup.teamup.model.entity.User
 import com.teamup.teamup.model.repository.ClubRepository
+import com.teamup.teamup.model.repository.ClubMemberRepository
 import com.teamup.teamup.model.repository.UserRepository
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
@@ -38,11 +40,47 @@ class InvitationPersistenceTests {
     @Autowired lateinit var mvc: MockMvc
     @Autowired lateinit var users: UserRepository
     @Autowired lateinit var clubs: ClubRepository
+    @Autowired lateinit var members: ClubMemberRepository
     private val mapper = ObjectMapper()
 
     private fun login(id: Long) = oauth2Login().oauth2User(
         DefaultOAuth2User(listOf(SimpleGrantedAuthority("ROLE_USER")), mapOf("userId" to id.toString()), "userId"),
     )
+
+    @Test
+    fun `club creation registers the authenticated owner as a player`() {
+        val owner = users.save(User("Create owner"))
+        val result = mvc.perform(post("/api/clubs").with(login(owner.id!!)).with(csrf()).contentType(MediaType.APPLICATION_JSON)
+            .content("""{"name":"Created club","sportType":"BASKETBALL","ownerProfile":{"name":"Captain","position":"PG","rating":70,"age":25,"notes":"Captain"}}"""))
+            .andExpect(status().isCreated).andExpect(jsonPath("$.activeMemberCount").value(1)).andReturn().response.contentAsString
+        val clubId = mapper.readTree(result).path("id").asLong()
+        mvc.perform(get("/api/clubs/$clubId/members").with(login(owner.id!!)))
+            .andExpect(status().isOk).andExpect(jsonPath("$.length()").value(1))
+            .andExpect(jsonPath("$[0].name").value("Captain")).andExpect(jsonPath("$[0].mine").value(true))
+            .andExpect(jsonPath("$[0].position").value("PG"))
+    }
+
+    @Test
+    fun `invited account sees and claims existing player while other club members can read all details`() {
+        val owner = users.save(User("Roster owner")); val first = users.save(User("First")); val second = users.save(User("Second"))
+        val club = clubs.save(Club(owner, "Roster", SportType.FUTSAL))
+        val player = members.save(ClubMember(club, "Existing", "FW", 70, 25, "roster note"))
+        val tokenResponse = mvc.perform(post("/api/clubs/${club.id}/invitation").with(login(owner.id!!)).with(csrf()))
+            .andExpect(status().isOk).andReturn().response.contentAsString
+        val token = mapper.readTree(tokenResponse).path("token").asString()
+        val preview = """{"token":"$token"}"""
+        mvc.perform(post("/api/invitations/preview").with(login(first.id!!)).with(csrf()).contentType(MediaType.APPLICATION_JSON).content(preview))
+            .andExpect(status().isOk).andExpect(jsonPath("$.candidates[0].id").value(player.id))
+        mvc.perform(post("/api/invitations/join").with(login(first.id!!)).with(csrf()).contentType(MediaType.APPLICATION_JSON)
+            .content("""{"token":"$token","memberId":${player.id}}""")).andExpect(status().isOk)
+        mvc.perform(post("/api/invitations/join").with(login(second.id!!)).with(csrf()).contentType(MediaType.APPLICATION_JSON)
+            .content("""{"token":"$token","profile":{"name":"New","position":"GK","rating":50}}""")).andExpect(status().isOk)
+        mvc.perform(get("/api/clubs/${club.id}/members").with(login(second.id!!)))
+            .andExpect(status().isOk).andExpect(jsonPath("$[?(@.name == 'Existing')].age").value(25))
+            .andExpect(jsonPath("$[?(@.name == 'Existing')].notes").value("roster note"))
+        mvc.perform(put("/api/clubs/${club.id}/members/${player.id}").with(login(second.id!!)).with(csrf()).contentType(MediaType.APPLICATION_JSON)
+            .content("""{"name":"Other","position":"FW","rating":70}""")).andExpect(status().isNotFound)
+    }
 
     @Test
     fun `two device sessions share persisted link and honor rotation revoke and owner access`() {
@@ -63,10 +101,8 @@ class InvitationPersistenceTests {
         }
 
         val first = issue(); read(first); read(first)
-        mvc.perform(put("/api/users/me/sport-profiles/BASKETBALL").with(login(member.id!!)).with(csrf()).contentType(MediaType.APPLICATION_JSON)
-            .content("""{"name":"HTTP Player","position":"C","rating":70}""")).andExpect(status().isOk)
         mvc.perform(post("/api/invitations/join").with(login(member.id!!)).with(csrf()).contentType(MediaType.APPLICATION_JSON)
-            .content("""{"token":"$first"}""")).andExpect(status().isOk)
+            .content("""{"token":"$first","profile":{"name":"HTTP Player","position":"C","rating":70}}""")).andExpect(status().isOk)
         // Membership does not grant permission to retrieve the invitation secret.
         mvc.perform(get(path).with(login(member.id!!))).andExpect(status().isNotFound)
         mvc.perform(get(path)).andExpect(status().isUnauthorized)
@@ -95,14 +131,10 @@ class InvitationPersistenceTests {
         mvc.perform(post(previewPath).with(login(member.id!!)).with(csrf()).contentType(MediaType.APPLICATION_JSON).content(body))
             .andExpect(status().isOk).andExpect(header().string("Cache-Control", "no-store"))
             .andExpect(jsonPath("$.clubId").value(clubId)).andExpect(jsonPath("$.sportType").value("LEAGUE_OF_LEGENDS"))
-            .andExpect(jsonPath("$.alreadyJoined").value(false)).andExpect(jsonPath("$.profileRegistered").value(false))
+            .andExpect(jsonPath("$.alreadyJoined").value(false)).andExpect(jsonPath("$.candidates.length()").value(0))
         mvc.perform(post("/api/invitations/join").with(login(member.id!!)).with(csrf()).contentType(MediaType.APPLICATION_JSON).content(body))
-            .andExpect(status().isConflict)
-        mvc.perform(put("/api/users/me/sport-profiles/LEAGUE_OF_LEGENDS").with(login(member.id!!)).with(csrf()).contentType(MediaType.APPLICATION_JSON)
-            .content("""{"name":"Summoner","position":"MID","rating":60,"age":23,"notes":"Emerald"}""")).andExpect(status().isOk)
-        mvc.perform(post(previewPath).with(login(member.id!!)).with(csrf()).contentType(MediaType.APPLICATION_JSON).content(body))
-            .andExpect(status().isOk).andExpect(jsonPath("$.profileRegistered").value(true)).andExpect(jsonPath("$.alreadyJoined").value(false))
-        mvc.perform(post("/api/invitations/join").with(login(member.id!!)).with(csrf()).contentType(MediaType.APPLICATION_JSON).content(body))
+            .andExpect(status().isBadRequest)
+        mvc.perform(post("/api/invitations/join").with(login(member.id!!)).with(csrf()).contentType(MediaType.APPLICATION_JSON).content(body.dropLast(1) + ",\"profile\":{\"name\":\"Summoner\",\"position\":\"MID\",\"rating\":60,\"age\":23,\"notes\":\"Emerald\"}}"))
             .andExpect(status().isOk).andExpect(jsonPath("$.alreadyJoined").value(false))
         mvc.perform(get("/api/clubs/$clubId/members").with(login(member.id!!)))
             .andExpect(status().isOk).andExpect(jsonPath("$.length()").value(1))

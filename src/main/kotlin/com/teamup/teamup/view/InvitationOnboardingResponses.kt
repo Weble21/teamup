@@ -7,7 +7,8 @@ data class InvitationPreviewResponse(
     val clubName: String,
     val sportType: SportType,
     val alreadyJoined: Boolean,
-    val profileRegistered: Boolean,
+    val candidates: List<InvitationCandidate>,
 )
 
+data class InvitationCandidate(val id: Long, val name: String, val position: String)
 data class InvitationJoinResponse(val clubId: Long, val alreadyJoined: Boolean)
