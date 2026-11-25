@@ -4,7 +4,7 @@ import jakarta.persistence.*
 import java.time.Instant
 
 @Entity
-@Table(name = "matches", uniqueConstraints = [UniqueConstraint(columnNames = ["club_id", "request_id"])])
+@Table(name = "matches", uniqueConstraints = [UniqueConstraint(columnNames = ["club_id", "request_id"]), UniqueConstraint(columnNames = ["attendance_vote_id"])])
 class MatchRecord(
     @field:ManyToOne(fetch = FetchType.LAZY, optional = false)
     @field:JoinColumn(name = "club_id", nullable = false, updatable = false)
@@ -18,6 +18,9 @@ class MatchRecord(
     val playedAt: Instant,
     @field:Column(length = 1000)
     val memo: String?,
+    @field:ManyToOne(fetch = FetchType.LAZY)
+    @field:JoinColumn(name = "attendance_vote_id", updatable = false)
+    val attendanceVote: AttendanceVote? = null,
 ) {
     @field:Id @field:GeneratedValue(strategy = GenerationType.IDENTITY)
     var id: Long? = null

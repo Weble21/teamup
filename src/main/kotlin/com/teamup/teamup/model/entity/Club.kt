@@ -16,8 +16,8 @@ import jakarta.persistence.Table
 @Table(name = "clubs")
 class Club(
     @field:ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @field:JoinColumn(name = "owner_id", nullable = false, updatable = false)
-    val owner: User,
+    @field:JoinColumn(name = "owner_id", nullable = false)
+    var owner: User,
 
     name: String,
 

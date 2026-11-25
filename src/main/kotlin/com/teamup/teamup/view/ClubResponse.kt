@@ -8,4 +8,5 @@ data class ClubResponse(
     val sportType: SportType,
     val ownerId: Long,
     val activeMemberCount: Long = 0,
+    val manager: Boolean = false,
 )

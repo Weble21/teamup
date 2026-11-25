@@ -20,7 +20,7 @@ class MatchController(private val service: MatchService) {
 
     @PostMapping
     fun confirm(@AuthenticationPrincipal principal: OAuth2User?, @PathVariable clubId: Long, @Valid @RequestBody request: CreateMatchRequest): ResponseEntity<MatchResponse> {
-        val result = service.confirm(userId(principal), clubId, request.requestId, request.memberIds, request.teams, request.playedAt, request.memo)
+        val result = service.confirm(userId(principal), clubId, request.requestId, request.memberIds, request.teams, request.playedAt, request.memo, request.attendanceVoteId)
         return ResponseEntity.created(URI.create("/api/clubs/$clubId/matches/${result.id}")).body(result)
     }
 

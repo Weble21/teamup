@@ -15,7 +15,11 @@ import org.springframework.transaction.annotation.Propagation
 import org.springframework.transaction.annotation.Transactional
 import org.springframework.web.server.ResponseStatusException
 import java.time.Instant
+import java.time.LocalDate
 import java.util.UUID
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import kotlin.test.*
 
 @DataJpaTest(properties = [
@@ -37,6 +41,9 @@ class MatchServiceTest {
     @Autowired lateinit var matches: MatchRepository
     @Autowired lateinit var teams: MatchTeamRepository
     @Autowired lateinit var participants: MatchTeamMemberRepository
+    @Autowired lateinit var votes: AttendanceVoteRepository
+    @Autowired lateinit var voteResponses: AttendanceResponseRepository
+    @Autowired lateinit var voteComments: AttendanceVoteCommentRepository
     @Autowired lateinit var jdbc: JdbcTemplate
     @Autowired lateinit var entityManagerFactory: EntityManagerFactory
     private var ownerId = 0L
@@ -47,6 +54,7 @@ class MatchServiceTest {
     @BeforeEach
     fun setup() {
         participants.deleteAllInBatch(); teams.deleteAllInBatch(); matches.deleteAllInBatch()
+        voteComments.deleteAllInBatch(); voteResponses.deleteAllInBatch(); votes.deleteAllInBatch(); memberships.deleteAllInBatch()
         members.deleteAllInBatch(); clubs.deleteAllInBatch(); users.deleteAllInBatch()
         val owner = users.save(User("Owner")); ownerId = owner.id!!
         val club = clubs.save(Club(owner, "Club", SportType.BASKETBALL)); clubId = club.id!!
@@ -56,6 +64,41 @@ class MatchServiceTest {
 
     private fun confirm(requestId: UUID = UUID.randomUUID()) =
         service.confirm(ownerId, clubId, requestId, ids, roster, Instant.parse("2026-11-09T01:00:00Z"), "Game")
+
+    @Test
+    fun `closed vote is linked to one match and later confirmation returns the existing record`() {
+        val vote = votes.save(AttendanceVote(clubs.findById(clubId).orElseThrow(), "title", "place", LocalDate.now(), Instant.now().minusSeconds(1)))
+        val first = service.confirm(ownerId, clubId, UUID.randomUUID(), ids, roster, null, null, vote.id!!)
+        val second = service.confirm(ownerId, clubId, UUID.randomUUID(), ids, roster, null, null, vote.id!!)
+        assertEquals(first, second); assertEquals(1, matches.count())
+        assertEquals(first.id, matches.findByAttendanceVoteId(vote.id!!)?.id)
+        assertEquals(first.id, service.detail(ownerId, clubId, first.id).id)
+    }
+
+    @Test
+    fun `vote match rejects open foreign and unauthorized vote requests`() {
+        val club = clubs.findById(clubId).orElseThrow()
+        val open = votes.save(AttendanceVote(club, "open", "place", LocalDate.now(), Instant.now().plusSeconds(18000)))
+        val otherClub = clubs.save(Club(users.findById(ownerId).orElseThrow(), "other", SportType.BASKETBALL))
+        val foreign = votes.save(AttendanceVote(otherClub, "foreign", "place", LocalDate.now(), Instant.now().minusSeconds(1)))
+        assertEquals(HttpStatus.CONFLICT, assertFailsWith<ResponseStatusException> { service.confirm(ownerId, clubId, UUID.randomUUID(), ids, roster, null, null, open.id!!) }.statusCode)
+        assertEquals(HttpStatus.NOT_FOUND, assertFailsWith<ResponseStatusException> { service.confirm(ownerId, clubId, UUID.randomUUID(), ids, roster, null, null, foreign.id!!) }.statusCode)
+        val otherUser = users.save(User("other user"))
+        assertEquals(HttpStatus.NOT_FOUND, assertFailsWith<ResponseStatusException> { service.confirm(otherUser.id!!, clubId, UUID.randomUUID(), ids, roster, null, null, open.id!!) }.statusCode)
+        assertEquals(0, matches.count())
+    }
+
+    @Test
+    fun `concurrent confirmations for the same vote return one match`() {
+        val vote = votes.save(AttendanceVote(clubs.findById(clubId).orElseThrow(), "title", "place", LocalDate.now(), Instant.now().minusSeconds(1)))
+        val start = CountDownLatch(1); val pool = Executors.newFixedThreadPool(2)
+        try {
+            val tasks = (1..2).map { pool.submit<Long> { start.await(); service.confirm(ownerId, clubId, UUID.randomUUID(), ids, roster, null, null, vote.id!!).id } }
+            start.countDown()
+            assertEquals(1, tasks.map { it.get(15, TimeUnit.SECONDS) }.distinct().size)
+            assertEquals(1, matches.count()); assertEquals(2, teams.count()); assertEquals(4, participants.count())
+        } finally { pool.shutdownNow() }
+    }
 
     @Test
     fun `invited member may read matches but cannot confirm them`() {
@@ -96,6 +139,31 @@ class MatchServiceTest {
         memberService.deactivate(ownerId, clubId, ids.first())
         assertEquals(first, confirm(key))
         assertEquals(1, matches.count()); assertEquals(2, teams.count()); assertEquals(4, participants.count())
+    }
+
+    @Test
+    fun `history includes schedule cards for confirmed votes and keeps quick records without a schedule`() {
+        val club = clubs.findById(clubId).orElseThrow()
+        val scheduled = (1..3).map { index ->
+            val vote = votes.save(AttendanceVote(club, "Schedule $index", "Gym $index", LocalDate.parse("2026-11-27"), Instant.parse("2026-11-25T01:00:00Z")))
+            service.confirm(ownerId, clubId, UUID.randomUUID(), ids, roster, null, null, vote.id!!).id to vote
+        }
+        val quick = confirm()
+        val statistics = entityManagerFactory.unwrap(SessionFactory::class.java).statistics
+        statistics.clear()
+        val history = service.list(ownerId, clubId, 0, 20)
+        // Authorization + one paged query that fetches optional schedule metadata.
+        assertEquals(2, statistics.prepareStatementCount)
+        assertEquals(4, history.matches.size)
+        assertNull(history.matches.single { it.id == quick.id }.attendanceVote)
+        for ((matchId, vote) in scheduled) {
+            val card = assertNotNull(history.matches.single { it.id == matchId }.attendanceVote)
+            assertEquals(vote.id, card.id); assertEquals(vote.title, card.title)
+            assertEquals(vote.location, card.location); assertEquals(vote.exerciseDate, card.exerciseDate)
+            assertEquals(vote.closesAt, card.closesAt)
+        }
+        assertEquals(2, service.list(ownerId, clubId, 0, 2).matches.size)
+        assertTrue(service.list(ownerId, clubId, 0, 2).hasNext)
     }
 
     @Test
@@ -150,7 +218,8 @@ class MatchServiceTest {
         val listed = clubService.getMyClubs(ownerId)
         assertEquals(3, listed.size)
         assertEquals(4, listed.first { it.id == clubId }.activeMemberCount)
-        assertEquals(3, statistics.prepareStatementCount)
+        // User check, visible clubs, batched roles, batched active counts.
+        assertEquals(4, statistics.prepareStatementCount)
         memberService.deactivate(ownerId, clubId, ids.first())
         assertEquals(3, clubService.getMyClubs(ownerId).first { it.id == clubId }.activeMemberCount)
         assertEquals(3, clubService.getMyClub(ownerId, clubId).activeMemberCount)

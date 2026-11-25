@@ -24,7 +24,7 @@ function ConfirmInvitationDialog({ method, onCancel, onConfirm }) {
 
 export default function ClubInvitationPanel({ clubId, onNotice, onCopied }) {
   const [invitation, setInvitation] = useState(null);
-  const [expanded, setExpanded] = useState(true);
+  const [expanded, setExpanded] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');

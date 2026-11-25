@@ -2,6 +2,7 @@ package com.teamup.teamup.controller
 
 import jakarta.validation.constraints.NotEmpty
 import jakarta.validation.constraints.Size
+import jakarta.validation.constraints.Positive
 import java.time.Instant
 import java.util.UUID
 
@@ -11,4 +12,5 @@ data class CreateMatchRequest(
     @field:NotEmpty val teams: List<List<Long?>?>,
     val playedAt: Instant? = null,
     @field:Size(max = 1000) val memo: String? = null,
+    @field:Positive val attendanceVoteId: Long? = null,
 )

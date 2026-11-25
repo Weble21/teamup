@@ -34,15 +34,15 @@ class ClubInvitationService(
 
     @Transactional(readOnly = true)
     fun getCurrent(ownerId: Long, clubId: Long): InvitationDetailsResponse {
-        clubs.findByIdAndOwnerId(clubId, ownerId)
+        clubs.findManaged(clubId, ownerId)
             ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "Club not found")
         val invitation = invitations.findByClubId(clubId)
         return InvitationDetailsResponse(invitation?.token, invitation != null && invitation.token == null)
     }
 
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     fun issue(ownerId: Long, clubId: Long): String {
-        val club = clubs.findOwnedForUpdate(clubId, ownerId)
+        val club = clubs.findManagedForUpdate(clubId, ownerId)
             ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "Club not found")
         val token = ByteArray(32).also(random::nextBytes).let { Base64.getUrlEncoder().withoutPadding().encodeToString(it) }
         val previous = invitations.findByClubId(clubId)
@@ -53,9 +53,9 @@ class ClubInvitationService(
         return token
     }
 
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     fun revoke(ownerId: Long, clubId: Long) {
-        clubs.findOwnedForUpdate(clubId, ownerId)
+        clubs.findManagedForUpdate(clubId, ownerId)
             ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "Club not found")
         invitations.findByClubId(clubId)?.let { invitations.delete(it) }
     }
@@ -67,8 +67,13 @@ class ClubInvitationService(
         val club = invitation.club
         val clubId = checkNotNull(club.id)
         val joined = club.owner.id == userId || memberships.existsByClubIdAndUserId(clubId, userId)
-        val candidates = if (joined) emptyList() else members.findAllByClubIdAndActiveTrueAndUserIsNullOrderByNameAscIdAsc(clubId)
-            .map { InvitationCandidate(checkNotNull(it.id), it.name, it.position) }
+        val previous = if (joined) null else members.findByClubIdAndUserId(clubId, userId)?.takeIf { it.departed }
+        val candidates = when {
+            joined -> emptyList()
+            previous != null -> listOf(InvitationCandidate(previous.id!!, previous.name, previous.position))
+            else -> members.findAllByClubIdAndActiveTrueAndUserIsNullOrderByNameAscIdAsc(clubId)
+                .map { InvitationCandidate(checkNotNull(it.id), it.name, it.position) }
+        }
         return InvitationPreviewResponse(clubId, club.name, club.sportType, joined, candidates)
     }
 
@@ -90,9 +95,14 @@ class ClubInvitationService(
         if ((memberId == null) == (profile == null) || (memberId != null && memberId <= 0))
             throw ResponseStatusException(HttpStatus.BAD_REQUEST, "Select a player or provide a profile")
         val user = users.findById(userId).orElseThrow { ResponseStatusException(HttpStatus.UNAUTHORIZED, "User not found") }
-        if (members.findByClubIdAndUserId(clubId, userId) != null)
+        val previous = members.findByClubIdAndUserId(clubId, userId)
+        if (previous != null && previous.departed) {
+            if (memberId != null && memberId != previous.id) throw ResponseStatusException(HttpStatus.CONFLICT, "기존 내 프로필을 선택하거나 새 정보를 입력해 주세요.")
+            profile?.let { previous.updateDetails(it.name, it.position, it.rating, it.age, it.notes) }
+            previous.rejoin()
+        } else if (previous != null) {
             throw ResponseStatusException(HttpStatus.CONFLICT, "User already has a club profile")
-        if (memberId != null) {
+        } else if (memberId != null) {
             val member = members.findForUpdate(memberId, clubId)
                 ?: throw ResponseStatusException(HttpStatus.CONFLICT, "Player is unavailable")
             if (!member.active || member.user != null) throw ResponseStatusException(HttpStatus.CONFLICT, "Player is unavailable")

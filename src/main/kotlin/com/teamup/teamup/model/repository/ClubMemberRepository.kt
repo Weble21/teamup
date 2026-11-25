@@ -15,6 +15,7 @@ interface ClubMemberRepository : JpaRepository<ClubMember, Long> {
     fun findAllByClubIdAndActiveTrueAndIdIn(clubId: Long, ids: Collection<Long>): List<ClubMember>
     fun findByIdAndClubId(id: Long, clubId: Long): ClubMember?
     fun findByClubIdAndUserId(clubId: Long, userId: Long): ClubMember?
+    fun findAllByClubIdAndUserIdIn(clubId: Long, userIds: Collection<Long>): List<ClubMember>
     fun findAllByClubIdAndActiveTrueAndUserIsNullOrderByNameAscIdAsc(clubId: Long): List<ClubMember>
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select m from ClubMember m where m.id = :id and m.club.id = :clubId")

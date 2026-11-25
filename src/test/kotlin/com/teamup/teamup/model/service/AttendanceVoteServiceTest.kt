@@ -23,6 +23,8 @@ class AttendanceVoteServiceTest {
     @Autowired lateinit var clubs: ClubRepository
     @Autowired lateinit var memberships: ClubMembershipRepository
     @Autowired lateinit var votes: AttendanceVoteRepository
+    @Autowired lateinit var members: ClubMemberRepository
+    @Autowired lateinit var matches: MatchRepository
     @Autowired lateinit var jdbc: JdbcTemplate
 
     @BeforeEach
@@ -63,7 +65,7 @@ class AttendanceVoteServiceTest {
     }
 
     @Test
-    fun `owner can change deadline and reopen a closed vote without losing responses`() {
+    fun `owner can change deadline before closing without losing responses`() {
         val owner = users.save(User("owner"))
         val club = clubs.save(Club(owner, "club", SportType.BASKETBALL))
         val vote = votes.save(AttendanceVote(club, "title", "place", LocalDate.now(), Instant.now().plusSeconds(18000)))
@@ -73,9 +75,9 @@ class AttendanceVoteServiceTest {
         assertEquals(newDeadline, service.list(club.id!!, owner.id!!).single().closesAt)
         assertEquals(AttendanceChoice.ATTENDING, service.list(club.id!!, owner.id!!).single().myChoice)
         val closed = votes.save(AttendanceVote(club, "closed", "place", LocalDate.now(), Instant.now().minusSeconds(1)))
-        service.changeDeadline(club.id!!, closed.id!!, owner.id!!, newDeadline)
-        service.respond(club.id!!, closed.id!!, owner.id!!, AttendanceChoice.UNDECIDED)
-        assertEquals(AttendanceChoice.UNDECIDED, service.list(club.id!!, owner.id!!).first { it.id == closed.id }.myChoice)
+        assertEquals(HttpStatus.CONFLICT, assertFailsWith<ResponseStatusException> {
+            service.changeDeadline(club.id!!, closed.id!!, owner.id!!, newDeadline)
+        }.statusCode)
     }
 
     @Test
@@ -97,5 +99,83 @@ class AttendanceVoteServiceTest {
             service.changeDeadline(club.id!!, vote.id!!, owner.id!!, Instant.now().minusSeconds(1))
         }.statusCode)
         assertEquals(initial, service.list(club.id!!, owner.id!!).single().closesAt)
+    }
+
+    @Test
+    fun `owner closes vote immediately and existing response remains unchanged`() {
+        val owner = users.save(User("owner")); val club = clubs.save(Club(owner, "club", SportType.BASKETBALL))
+        val vote = votes.save(AttendanceVote(club, "title", "place", LocalDate.now(), Instant.now().plusSeconds(18000)))
+        service.respond(club.id!!, vote.id!!, owner.id!!, AttendanceChoice.ATTENDING)
+        service.close(club.id!!, vote.id!!, owner.id!!)
+        val closed = service.list(club.id!!, owner.id!!).single()
+        assertEquals(true, closed.closed)
+        assertEquals(AttendanceChoice.ATTENDING, closed.myChoice)
+        service.close(club.id!!, vote.id!!, owner.id!!)
+        assertEquals(closed.closesAt, service.list(club.id!!, owner.id!!).single().closesAt)
+        assertEquals(HttpStatus.CONFLICT, assertFailsWith<ResponseStatusException> {
+            service.respond(club.id!!, vote.id!!, owner.id!!, AttendanceChoice.ABSENT)
+        }.statusCode)
+    }
+
+    @Test
+    fun `only the owner can close a vote`() {
+        val owner = users.save(User("owner")); val member = users.save(User("member")); val outsider = users.save(User("outsider"))
+        val club = clubs.save(Club(owner, "club", SportType.BASKETBALL)); memberships.save(ClubMembership(club, member))
+        val vote = votes.save(AttendanceVote(club, "title", "place", LocalDate.now(), Instant.now().plusSeconds(18000)))
+        assertEquals(HttpStatus.FORBIDDEN, assertFailsWith<ResponseStatusException> { service.close(club.id!!, vote.id!!, member.id!!) }.statusCode)
+        assertEquals(HttpStatus.NOT_FOUND, assertFailsWith<ResponseStatusException> { service.close(club.id!!, vote.id!!, outsider.id!!) }.statusCode)
+        assertEquals(false, service.list(club.id!!, owner.id!!).single().closed)
+    }
+
+    @Test
+    fun `club members can comment with authenticated account name even after voting closes`() {
+        val owner = users.save(User("Owner")); val member = users.save(User("Member"))
+        val club = clubs.save(Club(owner, "club", SportType.BASKETBALL)); memberships.save(ClubMembership(club, member))
+        val vote = votes.save(AttendanceVote(club, "title", "place", LocalDate.now(), Instant.now().minusSeconds(1)))
+        val comment = service.addComment(club.id!!, vote.id!!, member.id!!, "  See you next time  ")
+        assertEquals("Member", comment.authorName); assertEquals("See you next time", comment.content)
+        assertEquals(listOf(comment), service.list(club.id!!, owner.id!!).single().comments)
+    }
+
+    @Test
+    fun `comments reject outsiders wrong club and invalid content`() {
+        val owner = users.save(User("Owner")); val outsider = users.save(User("Outsider"))
+        val club = clubs.save(Club(owner, "club", SportType.BASKETBALL))
+        val otherClub = clubs.save(Club(owner, "other", SportType.BASKETBALL))
+        val vote = votes.save(AttendanceVote(club, "title", "place", LocalDate.now(), Instant.now().plusSeconds(18000)))
+        assertEquals(HttpStatus.NOT_FOUND, assertFailsWith<ResponseStatusException> { service.addComment(club.id!!, vote.id!!, outsider.id!!, "hello") }.statusCode)
+        assertEquals(HttpStatus.NOT_FOUND, assertFailsWith<ResponseStatusException> { service.addComment(otherClub.id!!, vote.id!!, owner.id!!, "hello") }.statusCode)
+        for (text in listOf("   ", "a".repeat(501))) assertEquals(HttpStatus.BAD_REQUEST,
+            assertFailsWith<ResponseStatusException> { service.addComment(club.id!!, vote.id!!, owner.id!!, text) }.statusCode)
+        assertEquals(emptyList(), service.list(club.id!!, owner.id!!).single().comments)
+    }
+
+    @Test
+    fun `closed vote setup maps attending accounts to active club member ids and reports unavailable profiles`() {
+        val owner = users.save(User("owner")); val activeUser = users.save(User("same")); val inactiveUser = users.save(User("same"))
+        val missing = users.save(User("missing")); val absent = users.save(User("absent"))
+        val club = clubs.save(Club(owner, "club", SportType.BASKETBALL))
+        listOf(activeUser, inactiveUser, missing, absent).forEach { memberships.save(ClubMembership(club, it)) }
+        val active = members.save(ClubMember(club, "same", "PG", 70, user = activeUser))
+        members.save(ClubMember(club, "same", "C", 70, user = inactiveUser).also { it.deactivate() })
+        val vote = votes.save(AttendanceVote(club, "title", "place", LocalDate.now(), Instant.now().plusSeconds(18000)))
+        listOf(activeUser, inactiveUser, missing).forEach { service.respond(club.id!!, vote.id!!, it.id!!, AttendanceChoice.ATTENDING) }
+        service.respond(club.id!!, vote.id!!, absent.id!!, AttendanceChoice.ABSENT)
+        assertEquals(HttpStatus.CONFLICT, assertFailsWith<ResponseStatusException> { service.teamSetup(club.id!!, vote.id!!, owner.id!!) }.statusCode)
+        service.close(club.id!!, vote.id!!, owner.id!!)
+        val setup = service.teamSetup(club.id!!, vote.id!!, owner.id!!)
+        assertEquals(listOf(active.id), setup.memberIds)
+        assertEquals(setOf(UnavailableAttendee("same", "INACTIVE"), UnavailableAttendee("missing", "PROFILE_MISSING")), setup.unavailable.toSet())
+        assertEquals(null, setup.matchId)
+        assertEquals(HttpStatus.NOT_FOUND, assertFailsWith<ResponseStatusException> { service.teamSetup(club.id!!, vote.id!!, activeUser.id!!) }.statusCode)
+    }
+
+    @Test
+    fun `vote list and setup expose existing linked match`() {
+        val owner = users.save(User("owner")); val club = clubs.save(Club(owner, "club", SportType.BASKETBALL))
+        val vote = votes.save(AttendanceVote(club, "title", "place", LocalDate.now(), Instant.now().minusSeconds(1)))
+        val match = matches.save(MatchRecord(club, java.util.UUID.randomUUID().toString(), club.sportType, Instant.now(), null, vote))
+        assertEquals(match.id, service.list(club.id!!, owner.id!!).single().matchId)
+        assertEquals(match.id, service.teamSetup(club.id!!, vote.id!!, owner.id!!).matchId)
     }
 }

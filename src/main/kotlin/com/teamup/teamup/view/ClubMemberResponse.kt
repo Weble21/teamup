@@ -10,4 +10,5 @@ data class ClubMemberResponse(
     val notes: String?,
     val active: Boolean,
     val mine: Boolean = false,
+    val departed: Boolean = false,
 )

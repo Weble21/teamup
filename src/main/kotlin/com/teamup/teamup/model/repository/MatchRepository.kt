@@ -10,7 +10,10 @@ import org.springframework.data.jpa.repository.JpaRepository
 
 interface MatchRepository : JpaRepository<MatchRecord, Long> {
     fun findByClubIdAndRequestId(clubId: Long, requestId: String): MatchRecord?
+    fun findByAttendanceVoteId(attendanceVoteId: Long): MatchRecord?
+    fun findAllByAttendanceVoteIdIn(attendanceVoteIds: Collection<Long>): List<MatchRecord>
     fun findByIdAndClubId(id: Long, clubId: Long): MatchRecord?
+    @EntityGraph(attributePaths = ["attendanceVote"])
     fun findAllByClubIdOrderByPlayedAtDescIdDesc(clubId: Long, pageable: Pageable): Slice<MatchRecord>
 }
 

@@ -43,7 +43,7 @@ class MatchControllerTest {
 
     @Test
     fun `confirmation returns 201 with resource location`() {
-        `when`(service.confirm(7, 3, key, listOf(5L, 8L), listOf(listOf(5L), listOf(8L)), null, null))
+        `when`(service.confirm(7, 3, key, listOf(5L, 8L), listOf(listOf(5L), listOf(8L)), null, null, null))
             .thenReturn(MatchResponse(9, 3, SportType.BASKETBALL, Instant.parse("2026-11-09T00:00:00Z"), null, emptyList()))
         mvc.perform(post("/api/clubs/3/matches").with(login()).with(csrf()).contentType(MediaType.APPLICATION_JSON).content(body))
             .andExpect(status().isCreated).andExpect(header().string("Location", "/api/clubs/3/matches/9"))
@@ -68,7 +68,7 @@ class MatchControllerTest {
 
     @Test
     fun `invalid confirmation request is rejected before service call`() {
-        for (invalid in listOf("{}", body.replace(key.toString(), "invalid"), body.replace("[5,8]", "[]"))) {
+        for (invalid in listOf("{}", body.replace(key.toString(), "invalid"), body.replace("[5,8]", "[]"), body.dropLast(1) + ",\"attendanceVoteId\":0}")) {
             mvc.perform(post("/api/clubs/3/matches").with(login()).with(csrf()).contentType(MediaType.APPLICATION_JSON).content(invalid))
                 .andExpect(status().isBadRequest)
         }

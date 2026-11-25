@@ -46,6 +46,7 @@ class ClubServiceTest {
 
     @BeforeEach
     fun clearDatabase() {
+        jdbc.update("DELETE FROM club_memberships")
         members.deleteAllInBatch()
         clubs.deleteAllInBatch()
         users.deleteAllInBatch()

@@ -11,6 +11,8 @@ class ClubMembership(
     @field:ManyToOne(fetch = FetchType.LAZY, optional = false)
     @field:JoinColumn(name = "user_id", nullable = false)
     val user: User,
+    @field:Column(nullable = false)
+    var manager: Boolean = false,
 ) {
     @field:Id @field:GeneratedValue(strategy = GenerationType.IDENTITY)
     var id: Long? = null

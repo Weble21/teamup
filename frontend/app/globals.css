@@ -94,9 +94,20 @@
 .generation-progress{margin-top:20px;padding:16px;background:#fff;border-radius:12px;font-size:13px}.progress-track{height:8px;overflow:hidden;margin-top:12px;border-radius:8px;background:#e7eef8}.progress-track div{height:100%;background:var(--blue);transition:width .1s linear}.primary:disabled,.secondary:disabled{opacity:.55;cursor:wait}
 .attendance-form, .attendance-vote { margin: 16px 0; padding: 18px; border: 1px solid #e1e5ec; border-radius: 12px; background: #fff; }
 .attendance-vote { box-shadow: 0 4px 14px rgba(18, 36, 70, .1); }
+.attendance-list-item { display: flex; align-items: center; gap: 12px; width: 100%; padding: 18px; border: 1px solid #e1e5ec; border-radius: 12px; background: #fff; color: var(--ink); box-shadow: 0 4px 14px rgba(18, 36, 70, .1); }
+.attendance-list-main { flex: 1; min-width: 0; padding: 0; border: 0; background: transparent; color: inherit; text-align: left; font-size: 15px; font-weight: 700; overflow-wrap: anywhere; }
+.attendance-list-item strong, .attendance-list-item span { display: block; }
+.attendance-list-item strong { margin-bottom: 8px; }
+.attendance-list-item span { color: var(--muted); font-size: 12px; font-weight: 400; line-height: 1.6; }
+.attendance-vote-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.attendance-vote-heading > div { min-width: 0; overflow-wrap: anywhere; }
+.vote-team-button { flex: none; min-height: 46px; padding: 0 12px; border: 1px solid var(--blue); border-radius: 10px; color: var(--blue); background: #eaf0f9; font-size: 13px; font-weight: 700; }
+.vote-team-button:disabled { color: #8b98aa; background: #f3f5f8; border-color: #d5dce6; cursor: not-allowed; }
+.vote-attendee-warning { margin: 12px 0; padding: 12px 14px; border-radius: 10px; background: #fff2e7; color: #874c12; font-size: 12px; line-height: 1.6; }
 .attendance-form label { display: block; margin: 12px 0; font-weight: 600; }
 .attendance-form input { display: block; width: 100%; margin-top: 6px; padding: 10px; border: 1px solid #cfd6e0; border-radius: 8px; }
 .attendance-deadline-form { margin: 12px 0; }
+.attendance-close { margin-left: 16px; color: #b52f3d; }
 .attendance-deadline-form label { display: block; font-size: 12px; font-weight: 700; }
 .attendance-deadline-form input { display: block; width: 100%; margin-top: 6px; padding: 10px; border: 1px solid #cfd6e0; border-radius: 8px; }
 .attendance-vote fieldset { border: 0; padding: 0; margin: 14px 0; }
@@ -113,6 +124,17 @@
 @media (prefers-reduced-motion: reduce) { .attendance-option { transition: none; } }
 .attendance-vote fieldset:disabled .attendance-option { cursor: default; opacity: .7; }
 .attendance-entry { width: 100%; margin-bottom: 20px; box-shadow: 0 4px 14px rgba(18, 36, 70, .1); }
+.vote-comments { margin-top: 16px; padding-top: 14px; border-top: 1px solid #e7ebf0; }
+.vote-comments h3 { margin: 0 0 10px; font-size: 14px; }
+.vote-comments h3 small, .vote-comments time { color: var(--muted); font-size: 11px; font-weight: 400; }
+.vote-comments ul { list-style: none; padding: 0; margin: 0; }
+.vote-comments li { padding: 10px 0; border-bottom: 1px solid #eef1f5; font-size: 13px; }
+.vote-comments li div { display: flex; justify-content: space-between; gap: 8px; }
+.vote-comments li p { margin: 6px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.vote-comments form { margin-top: 12px; }
+.vote-comments form label { display: block; font-size: 12px; font-weight: 700; }
+.vote-comments textarea { display: block; min-height: 70px; margin: 6px 0; padding: 10px; resize: vertical; border: 1px solid #cfd6e0; border-radius: 8px; }
+.vote-comments form button { width: 100%; height: 42px; background: #eaf0f9; }
 .my-club { background: white; border-radius: 14px; overflow: hidden; }
 .my-club-divider { border: 0; border-top: 1px solid #e7ebf0; margin: 0 12px; }
 .my-club-profile { padding: 10px 18px 16px; }
@@ -122,3 +144,7 @@
 .invitation-onboarding label.select-card { display: flex; margin: 8px 0; padding: 10px 15px; border: 1px solid #dce4ef; }
 .invitation-onboarding label.select-card input { width: 20px; height: 20px; margin: 0; flex: none; }
 .invitation-onboarding .primary + .secondary { margin-top: 10px; }
+.membership-panel{margin-top:28px;padding-top:20px;border-top:1px solid #d8e0ec;display:grid;gap:12px}
+.membership-panel>.secondary{width:100%}.membership-actions{display:flex;flex-wrap:wrap;gap:14px;align-items:center}
+.membership-people{background:#fff;border-radius:12px;padding:16px}.membership-person{padding:14px 0;border-bottom:1px solid #e5eaf1;display:grid;gap:10px}.membership-person:last-child{border-bottom:0}.membership-person small{font-weight:400;color:var(--muted);margin-left:8px}
+.danger-text{color:#b92438}.danger-action{background:#b92438}.membership-modal p{line-height:1.8}.membership-modal input{border-color:#b9c7dc}.membership-panel button:disabled{opacity:.45;cursor:not-allowed}

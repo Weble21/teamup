@@ -8,6 +8,7 @@ import org.springframework.data.domain.PageRequest
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
+import org.springframework.transaction.annotation.Isolation
 import org.springframework.web.server.ResponseStatusException
 import java.math.RoundingMode
 import java.time.Instant
@@ -23,25 +24,35 @@ class MatchService(
     private val participants: MatchTeamMemberRepository,
     private val assignmentService: TeamAssignmentService,
     private val memberships: ClubMembershipRepository,
+    private val votes: AttendanceVoteRepository,
 ) {
-    private fun ownedClub(ownerId: Long, clubId: Long): Club = clubs.findByIdAndOwnerId(clubId, ownerId)
+    private fun ownedClub(ownerId: Long, clubId: Long): Club = clubs.findManagedForUpdate(clubId, ownerId)
         ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "Club not found")
 
     private fun requireVisibleClub(userId: Long, clubId: Long) {
-        if (clubs.findByIdAndOwnerId(clubId, userId) == null && !memberships.existsByClubIdAndUserId(clubId, userId)) {
+        if (clubs.findManaged(clubId, userId) == null && !memberships.existsByClubIdAndUserId(clubId, userId)) {
             throw ResponseStatusException(HttpStatus.NOT_FOUND, "Club not found")
         }
     }
 
-    @Transactional
-    fun confirm(ownerId: Long, clubId: Long, requestId: UUID, memberIds: List<Long?>, roster: List<List<Long?>?>, playedAt: Instant?, memo: String?): MatchResponse {
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    fun confirm(ownerId: Long, clubId: Long, requestId: UUID, memberIds: List<Long?>, roster: List<List<Long?>?>, playedAt: Instant?, memo: String?, attendanceVoteId: Long? = null): MatchResponse {
         val club = ownedClub(ownerId, clubId)
+        val vote = attendanceVoteId?.let { voteId ->
+            val found = votes.findForUpdate(voteId, clubId) ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "Vote not found")
+            if (Instant.now().isBefore(found.closesAt)) throw ResponseStatusException(HttpStatus.CONFLICT, "Vote is not closed")
+            found
+        }
         val existing = matches.findByClubIdAndRequestId(clubId, requestId.toString())
-        if (existing != null) return response(existing, clubId)
+        if (existing != null) {
+            if (existing.attendanceVote?.id != attendanceVoteId) throw ResponseStatusException(HttpStatus.CONFLICT, "Request ID belongs to another match")
+            return response(existing, clubId)
+        }
+        if (attendanceVoteId != null) matches.findByAttendanceVoteId(attendanceVoteId)?.let { return response(it, clubId) }
         if ((memo?.length ?: 0) > 1000) throw ResponseStatusException(HttpStatus.BAD_REQUEST, "Memo is too long")
         val validated = assignmentService.validate(ownerId, clubId, memberIds, roster)
         val match = matches.save(MatchRecord(club, requestId.toString(), club.sportType,
-            (playedAt ?: Instant.now()).truncatedTo(ChronoUnit.MICROS), memo?.trim()?.takeIf { it.isNotEmpty() }))
+            (playedAt ?: Instant.now()).truncatedTo(ChronoUnit.MICROS), memo?.trim()?.takeIf { it.isNotEmpty() }, vote))
         for (assigned in validated.teams) {
             val team = teams.save(MatchTeam(match, assigned.teamNumber))
             participants.saveAll(assigned.members.map { member ->
@@ -64,7 +75,12 @@ class MatchService(
         requireVisibleClub(ownerId, clubId)
         if (page !in 0..100000 || size !in 1..100) throw ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid pagination")
         val slice = matches.findAllByClubIdOrderByPlayedAtDescIdDesc(clubId, PageRequest.of(page, size))
-        return MatchPageResponse(slice.content.map { MatchSummaryResponse(checkNotNull(it.id), it.sportSnapshot, it.playedAt, it.memo) }, page, slice.hasNext())
+        return MatchPageResponse(slice.content.map { match ->
+            val schedule = match.attendanceVote?.let {
+                MatchScheduleResponse(checkNotNull(it.id), it.title, it.exerciseDate, it.location, it.closesAt)
+            }
+            MatchSummaryResponse(checkNotNull(match.id), match.sportSnapshot, match.playedAt, match.memo, schedule)
+        }, page, slice.hasNext())
     }
 
     private fun response(match: MatchRecord, clubId: Long): MatchResponse {

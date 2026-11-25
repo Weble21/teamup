@@ -31,11 +31,22 @@ Entity를 직접 반환하지 않고 JSON DTO를 사용한다. 미인증은 401,
 | GET | `/api/clubs` | 내 모임 목록, 최신 ID 순 |
 | GET | `/api/clubs/{clubId}` | 모임 상세 |
 | PUT | `/api/clubs/{clubId}` | 이름·종목 수정 |
+| GET | `/api/clubs/{clubId}/memberships` | 모임장: 가입 계정과 모임장 여부 조회 |
+| PUT | `/api/clubs/{clubId}/managers/{targetId}` | 모임장: 지정·해제 또는 권한 위임, 204 |
+| POST | `/api/clubs/{clubId}/leave` | 본인 탈퇴, 과거 기록 보존, 204 |
+| DELETE | `/api/clubs/{clubId}` | 모임장: 확인 입력 후 모임 및 관련 자료 영구 삭제, 204 |
 | GET | `/api/clubs/{clubId}/invitation` | 관리자: 현재 초대 토큰 조회, `Cache-Control: no-store` |
 | POST | `/api/clubs/{clubId}/invitation` | 관리자: 기존 링크를 무효화하고 새 초대 토큰 발급 |
 | DELETE | `/api/clubs/{clubId}/invitation` | 관리자: 초대 링크 비활성화, 204 |
 | POST | `/api/invitations/preview` | 로그인 사용자: 초대 모임·가입 여부·선택 가능한 기존 선수 명단 확인 |
 | POST | `/api/invitations/join` | 로그인 사용자: 기존 선수 선택 또는 모임별 프로필 등록 및 가입, 반복 요청 가능 |
+| GET | `/api/clubs/{clubId}/attendance-votes` | 모임원의 운동 일정 투표와 응답 목록 조회 |
+| POST | `/api/clubs/{clubId}/attendance-votes` | 모임장: 운동 일정 투표 생성 |
+| PUT | `/api/clubs/{clubId}/attendance-votes/{voteId}/response` | 모임원: 참석 여부 선택 또는 변경 |
+| PUT | `/api/clubs/{clubId}/attendance-votes/{voteId}/deadline` | 모임장: 마감 시간 변경 |
+| POST | `/api/clubs/{clubId}/attendance-votes/{voteId}/close` | 모임장: 투표를 즉시 종료, 반복 요청 가능 |
+| GET | `/api/clubs/{clubId}/attendance-votes/{voteId}/team-setup` | 모임장: 종료된 투표의 편성 가능한 참석자와 제외 사유 조회 |
+| POST | `/api/clubs/{clubId}/attendance-votes/{voteId}/comments` | 모임원: 투표에 댓글 작성, 201 |
 | PUT | `/api/clubs/{clubId}/members/me` | 가입자의 회원 정보 생성 또는 수정 |
 | POST | `/api/clubs/{clubId}/members` | 회원 등록, 201 |
 | POST | `/api/clubs/{clubId}/members/bulk` | 회원 1~100명 일괄 등록, 201 |
@@ -52,6 +63,14 @@ Entity를 직접 반환하지 않고 JSON DTO를 사용한다. 미인증은 401,
 | GET | `/api/clubs/{clubId}/matches/{matchId}` | 경기 스냅샷 상세 |
 
 모임 응답의 `activeMemberCount`는 활성 회원 수다. 모임 목록은 회원 수를 한 번에 집계한다. 회원 목록은 관리자와 가입자에게 공개되며, `mine`은 로그인 사용자와 연결된 본인 정보인지 나타낸다. 같은 모임 가입자는 다른 회원의 나이와 메모를 포함한 모든 정보를 조회할 수 있다. `active=true`는 활성만, `false`는 비활성만, 생략은 전체다.
+
+경기 목록의 각 항목에는 `attendanceVote`가 포함된다. 운동 일정에서 확정한 기록은 `{id, title, exerciseDate, location, closesAt}`이며, 빠른 팀 편성 기록은 `null`이다. 일정 정보는 목록 쿼리에서 함께 조회해 경기 수에 비례하는 추가 조회를 피한다. 화면에서는 `matchId`가 있는 일정을 투표 목록에서 제외하고 이전 경기 기록에 일정 카드로 표시한다. 마감됐지만 팀을 확정하지 않은 일정은 투표 목록에 남는다. 투표 API는 확정된 일정도 반환해 이전 경기 기록에서 참석·댓글 상세를 계속 열 수 있다.
+
+투표 목록의 `closed`는 서버 시각 기준 종료 여부다. 투표 종료 요청은 세션·CSRF와 모임장 권한을 확인한다. 종료 시 기존 응답은 유지되고 마감 시간이 현재 시각으로 변경되어 추가 응답을 막는다. 이미 종료된 투표의 마감 시간은 수정할 수 없다. 종료 요청을 반복해도 마감 시간은 바뀌지 않는다.
+
+댓글 작성은 `{"content":"댓글 내용"}`을 보내며 공백만 있는 내용과 500자 초과는 거부한다. 모임원만 댓글을 읽고 작성할 수 있으며 작성자 이름은 인증된 계정에서 가져온다. 투표가 종료된 후에도 댓글을 작성할 수 있다. 투표 목록은 각 댓글의 `id`, `authorName`, `content`, `createdAt`을 포함한다.
+
+투표 목록의 `matchId`는 해당 일정으로 확정한 경기 기록 ID 또는 `null`이다. 팀 편성 준비 응답은 `memberIds`, `unavailable`, `matchId`를 포함하며 `unavailable`의 사유는 `PROFILE_MISSING` 또는 `INACTIVE`다. 사용자의 계정 ID로 같은 모임의 선수 정보를 찾고 이름만으로 연결하지 않는다. 종료되지 않았거나 다른 모임의 투표, 모임장이 아닌 사용자의 요청은 거부한다.
 
 종목별 공통 프로필 기능과 데이터는 제거하며, 각 모임의 선수 정보는 독립적으로 관리한다. MY 화면의 모임별 정보 수정은 `PUT /api/clubs/{clubId}/members/me`를 사용한다.
 
@@ -72,6 +91,20 @@ Entity를 직접 반환하지 않고 JSON DTO를 사용한다. 미인증은 401,
 수락 시 모임 → 초대 순서로 잠금을 획득해 재발급·비활성화 및 본인 선수 등록과 순서를 맞춘다. 가입 트랜잭션은 `READ_COMMITTED`를 사용해 잠금 대기 후 앞선 요청이 저장한 가입 정보를 읽도록 한다. 반복·동시 수락에서도 멤버십과 선수 정보를 중복 생성하지 않는다. 조회 후 초대가 무효화되면 최종 수락은 404로 거부한다.
 
 ## 요청 예시
+
+### 모임 탈퇴·삭제 및 모임장 관리
+
+모임 응답의 `manager`는 현재 로그인 사용자의 모임장 여부다. `ownerId`는 호환성을 위해 유지되는 대표 모임장 ID이며, 권한의 상하 관계를 의미하지 않는다. 추가 모임장도 모임 수정·초대 관리·회원 관리·투표 관리·팀 편성·경기 확정·모임장 관리·삭제를 동일하게 사용할 수 있다.
+
+- 모임장 추가: `PUT /api/clubs/{clubId}/managers/{targetId}`에 `{"manager":true}`.
+- 모임장 해제: 같은 URI에 `{"manager":false}`. 마지막 모임장은 409로 거부한다.
+- 권한 위임: 같은 URI에 `{"manager":true,"transfer":true}`. 대상은 모임장이 되고 요청자는 일반 모임원이 되며, 전체 변경은 한 트랜잭션이다.
+- 탈퇴: `POST /api/clubs/{clubId}/leave`. 멤버십을 제거하고 선수 프로필을 `departed=true`, `active=false`로 남긴다. 사용자 계정·경기 스냅샷·투표 응답·댓글은 보존한다. 마지막 모임장은 409다. 재가입 시 기존 본인 프로필 선택 또는 새 정보 입력을 통해 동일한 선수 ID를 재사용한다. 모임장 권한은 자동 복원하지 않는다.
+- 삭제: `DELETE /api/clubs/{clubId}`에 `{"confirmation":"삭제"}`. 앞뒤 공백도 허용하지 않는다. 모임·선수·일정·투표·응답·댓글·경기·초대·멤버십을 모두 삭제한다. 다른 모임과 사용자 계정은 유지한다. 삭제 도중 실패하면 전체를 롤백한다.
+
+모든 변경 요청에는 인증 세션과 CSRF 헤더가 필요하다. 모임장 권한이 없는 가입자의 권한 변경·삭제는 403, 가입하지 않은 계정이나 다른 모임의 대상은 404다. 모임장 변경·탈퇴·삭제는 모임 행을 잠그고 `READ_COMMITTED`로 처리해 마지막 모임장의 동시 탈퇴·해제를 방지한다.
+
+Excel 회원 가져오기는 현재 프론트엔드 진입 코드가 주석 처리되어 있다. 기존 일괄 등록 API와 Excel 처리 코드는 보존한다.
 
 모임 생성 (모임장 선수 프로필 필수):
 
@@ -138,6 +171,8 @@ Entity를 직접 반환하지 않고 JSON DTO를 사용한다. 미인증은 401,
 ```
 
 `requestId`는 한 번의 확정에 생성한 UUID이며 네트워크 재시도에도 유지한다. 같은 모임·요청 ID의 재요청은 처음 저장한 기록을 반환한다. 동시에 충돌하면 409를 받은 뒤 같은 ID로 재시도한다. `playedAt` 생략 시 서버 현재 시각, `memo` 최대 1000자다. 경기·팀·회원 스냅샷은 하나의 트랜잭션으로 저장한다. 현재 회원과 종목이 변경되거나 비활성화되어도 과거 기록은 바뀌지 않는다.
+
+운동 일정에서 확정할 때는 같은 본문에 `attendanceVoteId`를 추가한다. 서버는 해당 모임의 종료된 투표인지 확인하고 투표를 잠가 일정당 경기 기록을 하나만 생성한다. 다른 요청 ID로 이미 확정한 일정을 다시 요청해도 기존 경기 기록을 반환한다. 빠른 팀 편성은 이 필드를 생략한다.
 
 목록은 `playedAt DESC, id DESC`로 정렬한다. `page`는 0부터, `size`는 1~100이다. 응답은 `{matches, page, hasNext}`이며 상세는 선택 시 따로 조회한다.
 

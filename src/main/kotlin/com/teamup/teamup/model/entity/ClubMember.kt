@@ -69,6 +69,21 @@ class ClubMember(
         active = false
     }
 
+    @field:Column(nullable = false)
+    var departed: Boolean = false
+        protected set
+
+    fun depart() {
+        departed = true
+        active = false
+    }
+
+    fun rejoin() {
+        check(departed) { "Member has not left the club" }
+        departed = false
+        active = true
+    }
+
     fun updateDetails(name: String, position: String, rating: Int, age: Int?, notes: String?) {
         val trimmedName = name.trim()
         val trimmedPosition = position.trim()
