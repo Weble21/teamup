@@ -148,3 +148,7 @@
 .membership-panel>.secondary{width:100%}.membership-actions{display:flex;flex-wrap:wrap;gap:14px;align-items:center}
 .membership-people{background:#fff;border-radius:12px;padding:16px}.membership-person{padding:14px 0;border-bottom:1px solid #e5eaf1;display:grid;gap:10px}.membership-person:last-child{border-bottom:0}.membership-person small{font-weight:400;color:var(--muted);margin-left:8px}
 .danger-text{color:#b92438}.danger-action{background:#b92438}.membership-modal p{line-height:1.8}.membership-modal input{border-color:#b9c7dc}.membership-panel button:disabled{opacity:.45;cursor:not-allowed}
+.team-card .team-header h2{color:var(--blue)}
+.team-card.tone-1 .team-header h2,.team-card.tone-1 .team-score{color:var(--red)}
+.club-history-button{margin-top:12px}
+.bottom-nav-icon{width:20px;height:20px;vertical-align:middle;margin-right:4px}

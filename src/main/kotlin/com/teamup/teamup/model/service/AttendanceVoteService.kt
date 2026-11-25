@@ -48,8 +48,13 @@ class AttendanceVoteService(
         val byVote = if (items.isEmpty()) emptyMap() else responses.findWithUsers(items.map { checkNotNull(it.id) }).groupBy { it.vote.id }
         val commentsByVote = if (items.isEmpty()) emptyMap() else comments.findWithAuthors(items.map { checkNotNull(it.id) }).groupBy { it.vote.id }
         val matchByVote = if (items.isEmpty()) emptyMap() else matches.findAllByAttendanceVoteIdIn(items.map { checkNotNull(it.id) }).associate { it.attendanceVote!!.id to it.id }
+        val userIds = byVote.values.flatten().map { checkNotNull(it.user.id) }.distinct()
+        val namesByUser = if (userIds.isEmpty()) emptyMap() else members.findAllByClubIdAndUserIdIn(clubId, userIds)
+            .associate { checkNotNull(it.user?.id) to it.name }
         return items.map { vote ->
-            val people = byVote[vote.id].orEmpty().map { VotePerson(checkNotNull(it.user.id), it.user.name, it.choice) }
+            val people = byVote[vote.id].orEmpty().map {
+                VotePerson(checkNotNull(it.user.id), namesByUser[it.user.id] ?: it.user.name, it.choice)
+            }
             VoteView(checkNotNull(vote.id), vote.title, vote.location, vote.exerciseDate, vote.closesAt,
                 people.find { it.userId == userId }?.choice, people, !Instant.now().isBefore(vote.closesAt),
                 commentsByVote[vote.id].orEmpty().map(::commentView), matchByVote[vote.id])
@@ -71,7 +76,7 @@ class AttendanceVoteService(
             val member = byUser[response.user.id]
             when {
                 member == null -> unavailable.add(UnavailableAttendee(response.user.name, "PROFILE_MISSING"))
-                !member.active -> unavailable.add(UnavailableAttendee(response.user.name, "INACTIVE"))
+                !member.active -> unavailable.add(UnavailableAttendee(member.name, "INACTIVE"))
                 else -> eligible.add(checkNotNull(member.id))
             }
         }

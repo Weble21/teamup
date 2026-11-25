@@ -48,7 +48,7 @@ class ClubMemberService(
     }
     @Transactional(readOnly = true)
     fun validateParticipants(ownerId: Long, clubId: Long, memberIds: List<Long?>): List<ClubMemberResponse> {
-        if (clubRepository.findManaged(clubId, ownerId) == null) {
+        if (clubRepository.findManaged(clubId, ownerId) == null && !memberships.existsByClubIdAndUserId(clubId, ownerId)) {
             throw ResponseStatusException(HttpStatus.NOT_FOUND, "Club not found")
         }
         if (memberIds.isEmpty() || memberIds.any { it == null || it <= 0 } || memberIds.distinct().size != memberIds.size) {

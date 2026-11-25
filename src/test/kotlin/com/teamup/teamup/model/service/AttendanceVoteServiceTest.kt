@@ -45,10 +45,39 @@ class AttendanceVoteServiceTest {
         service.respond(clubId, vote.id, member.id!!, AttendanceChoice.UNDECIDED)
         service.respond(clubId, vote.id, member.id!!, AttendanceChoice.ATTENDING)
         assertEquals(AttendanceChoice.ATTENDING, service.list(clubId, owner.id!!).single().responses.single().choice)
+        assertEquals("member", service.list(clubId, owner.id!!).single().responses.single().name)
         assertEquals(HttpStatus.NOT_FOUND, assertFailsWith<ResponseStatusException> { service.list(clubId, outsider.id!!) }.statusCode)
         assertEquals(HttpStatus.FORBIDDEN, assertFailsWith<ResponseStatusException> {
             service.create(clubId, member.id!!, "title", "place", LocalDate.now(), Instant.now().plusSeconds(18000))
         }.statusCode)
+    }
+
+    @Test
+    fun `vote names use linked profiles in the current club for every choice and reflect profile edits`() {
+        val owner = users.save(User("Owner")); val account = users.save(User("김동건")); val sameName = users.save(User("김동건"))
+        val first = clubs.save(Club(owner, "First", SportType.BASKETBALL))
+        val second = clubs.save(Club(owner, "Second", SportType.BASKETBALL))
+        memberships.save(ClubMembership(first, account)); memberships.save(ClubMembership(second, account))
+        memberships.save(ClubMembership(first, sameName))
+        val profile = members.save(ClubMember(first, "김동건1", "PG", 70, user = account))
+        members.save(ClubMember(second, "김동건2", "C", 70, user = account))
+        members.save(ClubMember(first, "다른 선수", "C", 70, user = sameName))
+        val firstVote = votes.save(AttendanceVote(first, "First vote", "Gym", LocalDate.now(), Instant.now().plusSeconds(18000)))
+        val secondVote = votes.save(AttendanceVote(second, "Second vote", "Gym", LocalDate.now(), Instant.now().plusSeconds(18000)))
+        service.respond(first.id!!, firstVote.id!!, sameName.id!!, AttendanceChoice.ATTENDING)
+        service.respond(second.id!!, secondVote.id!!, account.id!!, AttendanceChoice.ATTENDING)
+        for (choice in AttendanceChoice.entries) {
+            service.respond(first.id!!, firstVote.id!!, account.id!!, choice)
+            val listed = service.list(first.id!!, account.id!!).single()
+            assertEquals("김동건1", listed.responses.single { it.userId == account.id }.name)
+            assertEquals("다른 선수", listed.responses.single { it.userId == sameName.id }.name)
+            assertEquals(choice, listed.myChoice)
+        }
+        profile.updateDetails("김동건3", "PG", 70, null, null)
+        assertEquals("김동건3", service.list(first.id!!, account.id!!).single().responses.single { it.userId == account.id }.name)
+        assertEquals("김동건2", service.list(second.id!!, account.id!!).single().responses.single().name)
+        profile.depart()
+        assertEquals("김동건3", service.list(first.id!!, owner.id!!).single().responses.single { it.userId == account.id }.name)
     }
 
     @Test
@@ -157,7 +186,7 @@ class AttendanceVoteServiceTest {
         val club = clubs.save(Club(owner, "club", SportType.BASKETBALL))
         listOf(activeUser, inactiveUser, missing, absent).forEach { memberships.save(ClubMembership(club, it)) }
         val active = members.save(ClubMember(club, "same", "PG", 70, user = activeUser))
-        members.save(ClubMember(club, "same", "C", 70, user = inactiveUser).also { it.deactivate() })
+        members.save(ClubMember(club, "Inactive player", "C", 70, user = inactiveUser).also { it.deactivate() })
         val vote = votes.save(AttendanceVote(club, "title", "place", LocalDate.now(), Instant.now().plusSeconds(18000)))
         listOf(activeUser, inactiveUser, missing).forEach { service.respond(club.id!!, vote.id!!, it.id!!, AttendanceChoice.ATTENDING) }
         service.respond(club.id!!, vote.id!!, absent.id!!, AttendanceChoice.ABSENT)
@@ -165,7 +194,7 @@ class AttendanceVoteServiceTest {
         service.close(club.id!!, vote.id!!, owner.id!!)
         val setup = service.teamSetup(club.id!!, vote.id!!, owner.id!!)
         assertEquals(listOf(active.id), setup.memberIds)
-        assertEquals(setOf(UnavailableAttendee("same", "INACTIVE"), UnavailableAttendee("missing", "PROFILE_MISSING")), setup.unavailable.toSet())
+        assertEquals(setOf(UnavailableAttendee("Inactive player", "INACTIVE"), UnavailableAttendee("missing", "PROFILE_MISSING")), setup.unavailable.toSet())
         assertEquals(null, setup.matchId)
         assertEquals(HttpStatus.NOT_FOUND, assertFailsWith<ResponseStatusException> { service.teamSetup(club.id!!, vote.id!!, activeUser.id!!) }.statusCode)
     }

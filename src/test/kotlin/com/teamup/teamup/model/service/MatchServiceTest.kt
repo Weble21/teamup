@@ -31,6 +31,7 @@ import kotlin.test.*
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
 class MatchServiceTest {
     @Autowired lateinit var service: MatchService
+    @Autowired lateinit var assignments: TeamAssignmentService
     @org.springframework.test.context.bean.override.mockito.MockitoBean lateinit var embeddings: EmbeddingConstraintClient
     @Autowired lateinit var memberService: ClubMemberService
     @Autowired lateinit var clubService: ClubService
@@ -101,16 +102,50 @@ class MatchServiceTest {
     }
 
     @Test
-    fun `invited member may read matches but cannot confirm them`() {
+    fun `ordinary member can generate validate swap and confirm quick teams but not scheduled teams`() {
         val user = users.save(User("Member"))
         val saved = confirm()
         memberships.save(ClubMembership(clubs.findById(clubId).orElseThrow(), user))
         try {
             assertEquals(saved.id, service.list(user.id!!, clubId, 0, 20).matches.single().id)
             assertEquals(saved, service.detail(user.id!!, clubId, saved.id))
-            val error = assertFailsWith<ResponseStatusException> { service.confirm(user.id!!, clubId, UUID.randomUUID(), ids, roster, null, null) }
+            val generated = assignments.generate(user.id!!, clubId, ids, 2)
+            val generatedRoster = generated.teams.map { it.members.map { member -> member.memberId } }
+            assignments.validate(user.id!!, clubId, ids, generatedRoster)
+            val swapped = assignments.swap(user.id!!, clubId, ids, generatedRoster, generatedRoster[0][0], generatedRoster[1][0])
+            val changedRoster = swapped.teams.map { it.members.map { member -> member.memberId } }
+            val requestId = UUID.randomUUID()
+            val quick = service.confirm(user.id!!, clubId, requestId, ids, changedRoster, null, null)
+            assertEquals(quick, service.confirm(user.id!!, clubId, requestId, ids, changedRoster, null, null))
+            assertEquals(2, matches.count())
+            assertNull(matches.findById(quick.id).orElseThrow().attendanceVote)
+            val vote = votes.save(AttendanceVote(clubs.findById(clubId).orElseThrow(), "Closed", "Gym", LocalDate.now(), Instant.now().minusSeconds(1)))
+            val error = assertFailsWith<ResponseStatusException> { service.confirm(user.id!!, clubId, UUID.randomUUID(), ids, roster, null, null, vote.id!!) }
             assertEquals(HttpStatus.NOT_FOUND, error.statusCode)
+            assertNull(matches.findByAttendanceVoteId(vote.id!!))
+            memberships.deleteAllInBatch()
+            assertEquals(HttpStatus.NOT_FOUND, assertFailsWith<ResponseStatusException> {
+                assignments.generate(user.id!!, clubId, ids, 2)
+            }.statusCode)
+            assertEquals(HttpStatus.NOT_FOUND, assertFailsWith<ResponseStatusException> {
+                service.confirm(user.id!!, clubId, UUID.randomUUID(), ids, roster, null, null)
+            }.statusCode)
         } finally { memberships.deleteAllInBatch() }
+    }
+
+    @Test
+    fun `ordinary member quick formation still rejects inactive and foreign players`() {
+        val user = users.save(User("Member"))
+        memberships.save(ClubMembership(clubs.findById(clubId).orElseThrow(), user))
+        val other = clubs.save(Club(users.findById(ownerId).orElseThrow(), "Other", SportType.BASKETBALL))
+        val foreignId = memberService.create(ownerId, other.id!!, "Foreign", "PG", 50, null, null).id
+        memberService.deactivate(ownerId, clubId, ids.last())
+        for (selection in listOf(ids, ids.take(3) + foreignId)) {
+            assertEquals(HttpStatus.BAD_REQUEST, assertFailsWith<ResponseStatusException> {
+                assignments.generate(user.id!!, clubId, selection, 2)
+            }.statusCode)
+        }
+        assertEquals(0, matches.count())
     }
 
     @Test

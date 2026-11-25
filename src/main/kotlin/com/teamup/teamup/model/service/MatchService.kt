@@ -37,7 +37,12 @@ class MatchService(
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
     fun confirm(ownerId: Long, clubId: Long, requestId: UUID, memberIds: List<Long?>, roster: List<List<Long?>?>, playedAt: Instant?, memo: String?, attendanceVoteId: Long? = null): MatchResponse {
-        val club = ownedClub(ownerId, clubId)
+        val club = if (attendanceVoteId != null) ownedClub(ownerId, clubId) else {
+            // Serialize quick confirmations with leaving/deleting the club.
+            val visible = clubs.findForUpdate(clubId) ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "Club not found")
+            requireVisibleClub(ownerId, clubId)
+            visible
+        }
         val vote = attendanceVoteId?.let { voteId ->
             val found = votes.findForUpdate(voteId, clubId) ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "Vote not found")
             if (Instant.now().isBefore(found.closesAt)) throw ResponseStatusException(HttpStatus.CONFLICT, "Vote is not closed")

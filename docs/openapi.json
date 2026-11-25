@@ -735,7 +735,8 @@
           "503": {
             "description": "API 키 미설정"
           }
-        }
+        },
+        "description": "Available to all currently joined club members for quick team assignments. Participant and roster validation still applies."
       }
     },
     "/api/clubs/{clubId}/team-assignments": {
@@ -797,7 +798,8 @@
               }
             }
           }
-        }
+        },
+        "description": "Available to all currently joined club members for quick team assignments. Participant and roster validation still applies."
       }
     },
     "/api/clubs/{clubId}/team-assignments/validate": {
@@ -859,7 +861,8 @@
               }
             }
           }
-        }
+        },
+        "description": "Available to all currently joined club members for quick team assignments. Participant and roster validation still applies."
       }
     },
     "/api/clubs/{clubId}/team-assignments/swap": {
@@ -921,7 +924,8 @@
               }
             }
           }
-        }
+        },
+        "description": "Available to all currently joined club members for quick team assignments. Participant and roster validation still applies."
       }
     },
     "/api/clubs/{clubId}/matches": {
@@ -983,7 +987,8 @@
               }
             }
           }
-        }
+        },
+        "description": "All currently joined club members can confirm quick assignments (attendanceVoteId absent or null). A non-null attendanceVoteId requires manager authority and a closed vote."
       },
       "get": {
         "summary": "경기 목록",
