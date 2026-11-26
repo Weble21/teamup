@@ -41,17 +41,10 @@ services:
       dockerfile: Dockerfile.frontend
     environment:
       BACKEND_URL: http://backend:8080
-      IMPORTS_URL: http://imports:8000
     ports:
       - "127.0.0.1:3000:3000"
     depends_on:
       - backend
-      - imports
-
-  imports:
-    build:
-      context: .
-      dockerfile: imports/Dockerfile
 
   constraints:
     build:
