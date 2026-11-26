@@ -1,0 +1,23 @@
+FROM eclipse-temurin:25-jdk AS build
+WORKDIR /app
+COPY gradlew settings.gradle.kts build.gradle.kts ./
+COPY gradle ./gradle
+RUN chmod +x gradlew
+COPY src ./src
+RUN ./gradlew bootJar --no-daemon -x test
+
+FROM eclipse-temurin:25-jre
+WORKDIR /app
+RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-venv \
+    && rm -rf /var/lib/apt/lists/* \
+    && python3 -m venv /opt/constraints-venv
+COPY constraints/requirements.txt /app/constraints/requirements.txt
+RUN /opt/constraints-venv/bin/pip install --no-cache-dir -r /app/constraints/requirements.txt
+ENV FASTEMBED_CACHE_PATH=/models
+RUN /opt/constraints-venv/bin/python -c "from fastembed import TextEmbedding; TextEmbedding(model_name='sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2', cache_dir='/models')"
+COPY --from=build /app/build/libs/*.jar /app/app.jar
+COPY constraints/app.py /app/constraints/app.py
+COPY deploy/run_combined.py /app/run_combined.py
+ENV CONSTRAINTS_URL=http://127.0.0.1:8001
+EXPOSE 8080
+CMD ["/opt/constraints-venv/bin/python", "/app/run_combined.py"]
