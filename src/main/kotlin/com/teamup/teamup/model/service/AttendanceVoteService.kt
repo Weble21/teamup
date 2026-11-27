@@ -28,6 +28,7 @@ class AttendanceVoteService(
     private val comments: AttendanceVoteCommentRepository,
     private val members: ClubMemberRepository,
     private val matches: MatchRepository,
+    private val events: org.springframework.context.ApplicationEventPublisher,
 ) {
     private fun visibleClub(clubId: Long, userId: Long): Club {
         val club = clubs.findById(clubId).orElseThrow { ResponseStatusException(HttpStatus.NOT_FOUND, "Club not found") }
@@ -89,7 +90,8 @@ class AttendanceVoteService(
         if (clubs.findManaged(clubId, userId) == null) throw ResponseStatusException(HttpStatus.FORBIDDEN, "Only the club owner can create votes")
         if (title.isBlank() || title.trim().length > 150 || location.isBlank() || location.trim().length > 100 || closesAt.isBefore(Instant.now().plusSeconds(4 * 3600)))
             throw ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid vote details")
-        votes.save(AttendanceVote(club, title.trim(), location.trim(), date, closesAt))
+        val vote = votes.save(AttendanceVote(club, title.trim(), location.trim(), date, closesAt))
+        events.publishEvent(VoteCreated(clubId, checkNotNull(vote.id)))
     }
 
     @Transactional(isolation = Isolation.READ_COMMITTED)

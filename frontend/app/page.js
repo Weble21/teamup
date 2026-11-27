@@ -14,6 +14,8 @@ import AlertModal from './AlertModal';
 import AttendanceVotes from './AttendanceVotes';
 import MatchHistoryCard from './MatchHistoryCard';
 import { requestedClub, clubPageUrl } from './clubNavigation.mjs';
+import { disableVotePush } from './VotePushSettings';
+import InstallApp from './InstallApp';
 import { formatRating, isLol } from './ratings.mjs';
 
 const guestStorageKey = 'teamup:guest:v1';
@@ -140,6 +142,9 @@ export default function Home() {
       setNotice('유효하지 않은 초대 링크입니다. 모임 관리자에게 새 링크를 요청해 주세요.');
     }
     const storedInvite = sessionStorage.getItem(invitationStorageKey);
+    const query = new URLSearchParams(location.search);
+    if (query.has('vote') && query.has('club')) sessionStorage.setItem('teamup:vote-link', query.toString());
+    const voteQuery = new URLSearchParams(sessionStorage.getItem('teamup:vote-link') ?? '');
     async function restore() {
       if (new URLSearchParams(location.search).has('loginError')) setNotice('소셜 로그인에 실패했습니다. 설정과 동의를 확인해 주세요.');
       try {
@@ -153,9 +158,13 @@ export default function Home() {
         const current = await response.json();
         const rows = await loadServerClubs();
         if (!cancelled && !choseGuest.current) {
-          const target = storedInvite ? null : requestedClub(location.search, rows);
+          const target = storedInvite ? null : requestedClub(voteQuery.has('vote') ? voteQuery : location.search, rows);
+          const voteId = Number(voteQuery.get('vote'));
+          const openVote = target && Number.isSafeInteger(voteId) && voteId > 0;
+          sessionStorage.removeItem('teamup:vote-link');
+          if (openVote) { setAttendanceVoteId(voteId); setAttendanceVoteOrigin('attendance'); }
           setUser(current); setClubs(rows);
-          setClubId(target?.id ?? null); setScreen(storedInvite ? 'invitation' : target ? 'detail' : 'clubs');
+          setClubId(target?.id ?? null); setScreen(storedInvite ? 'invitation' : openVote ? 'attendanceVote' : target ? 'detail' : 'clubs');
           if (!storedInvite && new URLSearchParams(location.search).has('club') && !target) setNotice('해당 모임에 접근할 수 없어 목록으로 이동했습니다.');
         }
       } catch { if (!cancelled && storedInvite) setPendingInvite(storedInvite); if (!cancelled && new URLSearchParams(location.search).has('signedIn')) setNotice('서버 연결을 확인해 주세요.'); } finally { if (!cancelled) setNavigationReady(true); }
@@ -172,9 +181,12 @@ export default function Home() {
 
   useEffect(() => {
     if (!navigationReady) return;
-    const targetId = screen === 'detail' && club ? clubId : null;
-    history.replaceState(null, '', clubPageUrl(location.href, targetId, !user));
-  }, [navigationReady, screen, clubId, club, user]);
+    const targetId = ['detail', 'attendanceVote'].includes(screen) && club ? clubId : null;
+    const url = new URL(location.href);
+    if (screen === 'attendanceVote') url.searchParams.set('vote', String(attendanceVoteId));
+    else url.searchParams.delete('vote');
+    history.replaceState(null, '', clubPageUrl(url, targetId, !user));
+  }, [navigationReady, screen, clubId, club, user, attendanceVoteId]);
   async function serverOperation(action) {
     if (operation.current) return;
     operation.current = true; setBusy(true); setError('');
@@ -236,6 +248,7 @@ export default function Home() {
 
   function logout() {
     return serverOperation(async () => {
+      await disableVotePush().catch(() => {});
       await api('/api/auth/logout', { method: 'POST' });
       setUser(null); setClubs([]); setClubId(null); setScreen('welcome'); setNotice('로그아웃했습니다.');
     });
@@ -421,6 +434,7 @@ export default function Home() {
         {screen === 'result' && <>{generating && <div className="generation-progress" role="status"><strong>조건에 맞는 균형 잡힌 팀을 찾고 있어요.</strong><div className="progress-track" role="progressbar" aria-label="요청 경과 시간 (5초 기준)" aria-valuemin={0} aria-valuemax={5} aria-valuenow={Math.min(4.95, generationElapsed / 1000)}><div style={{ width: `${Math.min(99, generationElapsed / 50)}%` }} /></div><p className="help">{generationElapsed < 5000 ? '요청 경과 시간 (탐색 예산 5초 기준)' : '조건 확인과 서버 응답을 기다리고 있어요.'}</p></div>}{user && balanceLimited && <p className="help" role="status">조건상 균형에 한계가 있습니다</p>}<div className="meta">다른 팀의 선수를 차례로 선택해 교환하세요</div><div className="balance"><span>{isLol(sportCode(club.sport)) ? '평균 티어 점수 차이' : '평균 능력치 차이'}</span><strong>{displayRating(Math.max(...teams.map(average))-Math.min(...teams.map(average))).toFixed(1)} <small>POINTS</small></strong></div>{isLol(sportCode(club.sport)) && <p className="help">티어를 아이언 1점~챌린저 10점으로 환산한 팀 편성용 점수입니다.</p>}<div className="stack">{teams.map((team, i) => <section className={'team-card tone-'+(i%2)} key={i}><div className="team-header"><div><div className="eyebrow">LINEUP {String(i+1).padStart(2,'0')}</div><h2>TEAM {String.fromCharCode(65+i)}</h2></div><div className="team-score"><strong>{displayRating(average(team)).toFixed(1)}</strong><small>{isLol(sportCode(screen === 'match' ? historyItem.sport : club.sport)) ? '평균 티어 점수' : '평균'} · 총점 {displayRating(team.reduce((s,p)=>s+p.rating,0))}</small></div></div>{team.map((p,j) => <button className={'team-player '+(swap?.teamIndex===i && swap?.memberIndex===j?'chosen':'')} key={p.id} disabled={generating} onClick={() => swapMember(i,j)}><strong>{p.name}</strong><span>{p.position}</span><b>{formatRating(p.rating, sportCode(club.sport))}</b></button>)}<TeamInsight team={team} insight={analysis?.find(item => item.teamNumber === i + 1)} status={analysisStatus} /></section>)}</div>{interpretedConditions.length > 0 && <p className="help">적용한 조건: {interpretedConditions.join(' · ')}</p>}{swap && <p className="help">교환할 다른 팀의 선수를 선택해 주세요.</p>}<div className="button-row"><button className="secondary" disabled={generating} onClick={handleGenerate}>다시 나누기</button><button className="secondary" onClick={() => setSwap(null)}>선택 취소</button></div><button className="primary" disabled={generating} onClick={() => saveMatch()}>결과 확정하기 <span>→</span></button><p className="help">{user ? '확정 시 서버에서 다시 검증하고 경기 기록으로 저장합니다.' : '확정 결과는 이 브라우저에만 저장됩니다.'}</p></>}
         {screen === 'history' && <><div className="meta">{club.name}의 지난 경기를 모았어요</div><div className="section-heading"><div><div className="eyebrow blue">MATCH ARCHIVE</div><h2>최근 경기</h2></div></div><div className="stack">{club.matches.length === 0 && <div className="empty">아직 저장된 경기 기록이 없습니다.<br/>첫 경기를 만들어 보세요.</div>}{club.matches.map(match => <MatchHistoryCard key={match.id} match={match} onOpenMatch={openMatch} onOpenSchedule={voteId => { setAttendanceVoteOrigin('history'); setAttendanceVoteId(voteId); setScreen('attendanceVote'); }} />)}</div></>}
         {screen === 'match' && historyItem && <><div className="meta">{new Date(historyItem.date).toLocaleDateString('ko-KR')} · {historyItem.sport}</div><div className="section-heading"><div><div className="eyebrow blue">MATCH LINEUP</div><h2>당시 팀 구성</h2></div></div><div className="stack">{historyItem.teams.map((team,i) => <section className={'team-card tone-'+(i%2)} key={i}><div className="team-header"><h2>TEAM {String.fromCharCode(65+i)}</h2><div className="team-score"><strong>{displayRating(average(team)).toFixed(1)}</strong><small>{isLol(sportCode(screen === 'match' ? historyItem.sport : club.sport)) ? '평균 티어 점수' : '평균'} · 총점 {displayRating(team.reduce((n,p)=>n+p.rating,0))}</small></div></div>{team.map(p => <div className="team-player" key={p.id}><strong>{p.name}</strong><span>{p.position}</span><b>{formatRating(p.rating, sportCode(historyItem.sport))}</b></div>)}</section>)}</div><p className="help">기록 당시의 회원 정보입니다.</p></>}
+        <InstallApp visible={['welcome', 'clubs', 'my'].includes(screen)} onNotice={setNotice} />
       </main>
       {screen !== 'welcome' && <nav className="bottom-nav" aria-label="하단 메뉴"><button className={['clubs','detail','members','formation','result','history','match'].includes(screen)?'active':''} onClick={() => setScreen('clubs')}><svg className="bottom-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1Z" /></svg> 홈 화면</button><button className={screen === 'guide' ? 'active' : ''} onClick={() => setScreen('guide')}><span>▤</span> 설명서</button><button className={screen === 'my' ? 'active' : ''} onClick={() => setScreen('my')}><svg className="bottom-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="7" r="4" /><path d="M4 21v-2a8 8 0 0 1 16 0v2" /></svg> MY</button></nav>}
       {screen === 'history' && user && historyNext && <button className="secondary" onClick={() => moreHistory()}>기록 더 보기</button>}{notice && screen !== 'formation' && <Toast key={noticeVersion} message={notice} onDismiss={setNotice} />}

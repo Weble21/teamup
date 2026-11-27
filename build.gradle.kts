@@ -20,6 +20,12 @@ repositories {
 }
 
 dependencies {
+	implementation("nl.martijndwars:web-push:5.1.2") {
+		exclude(group = "org.asynchttpclient")
+		exclude(group = "org.bouncycastle", module = "bcprov-jdk15on")
+	}
+	implementation("org.bouncycastle:bcprov-jdk18on:1.83")
+	implementation("org.apache.httpcomponents:httpclient:4.5.14")
 	implementation("org.springframework.boot:spring-boot-starter-data-jpa")
 	implementation("org.springframework.boot:spring-boot-starter-flyway")
 	implementation("org.springframework.boot:spring-boot-starter-security")

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from './api';
 import ExerciseScheduleCard from './ExerciseScheduleCard';
+import VotePushSettings from './VotePushSettings';
 import { pendingAttendanceVotes } from './attendanceVoteOrder.mjs';
 
 const options = [['ATTENDING', '참석'], ['ABSENT', '불참석'], ['UNDECIDED', '보류']];
@@ -119,7 +120,7 @@ export default function AttendanceVotes({ clubId, isManager, onNotice, selectedV
   const pendingVotes = pendingAttendanceVotes(votes, now);
 
   return <section aria-label="운동 일정 참석 투표">
-    {selectedVoteId == null && <><div className="section-heading"><div><div className="eyebrow blue">ATTENDANCE VOTE</div><h2>운동 일정 투표</h2></div>{isManager && <button className="text-button" onClick={() => setOpen(value => !value)}>{open ? '닫기' : '＋ 투표 만들기'}</button>}</div><p className="help">투표 마감 전 푸시 알림은 아직 제공되지 않습니다.</p></>}
+    {selectedVoteId == null && <><div className="section-heading"><div><div className="eyebrow blue">ATTENDANCE VOTE</div><h2>운동 일정 투표</h2></div>{isManager && <button className="text-button" onClick={() => setOpen(value => !value)}>{open ? '닫기' : '＋ 투표 만들기'}</button>}</div><VotePushSettings onNotice={onNotice} /></>}
     {selectedVoteId == null && open && <form className="attendance-form" onSubmit={create}>
       <label>운동 날짜<input type="date" required value={date} onChange={e => { setDate(e.target.value); if (!edited) setTitle(suggestedTitle(e.target.value, location)); }} /></label>
       <label>장소<input required maxLength={100} value={location} onChange={e => { setLocation(e.target.value); if (!edited) setTitle(suggestedTitle(date, e.target.value)); }} /></label>
