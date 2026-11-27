@@ -1,23 +1,23 @@
 const steps = [
   {
-    title: '시작하기',
-    description: '시작 화면 → 로그인 또는 게스트 선택',
-  },
-  {
-    title: '모임 만들기와 가입하기',
-    description: '홈 화면 → 새 모임 만들기 → 종목 고르기\n초대 링크 → 모임 가입',
+    title: '모임 만들기',
+    description: '카카오 또는 네이버로 로그인하세요. 내 모임에서 ‘새 모임 만들기’를 누르고 이름과 종목을 정하세요.',
   },
   {
     title: '선수 명단 준비하기',
-    description: '모임 → 회원 관리 → 선수 추가\nMY → 종목별 내 정보 저장',
+    description: '모임장은 ‘회원 관리 → 회원 추가’에서 선수를 등록하거나 모임 화면의 초대 링크를 공유할 수 있어요.',
+  },
+  {
+    title: '초대받은 모임에 참여하기',
+    description: '초대 링크로 로그인한 뒤 명단에서 내 이름을 고르세요. 이름이 없으면 ‘명단에 없어요 · 내 정보 등록’을 누르세요. 가입 후 ‘운동 일정 투표’에서 참석 여부를 알릴 수 있어요.',
   },
   {
     title: '팀 나누기',
-    description: '모임 → 팀 나누기 → 참석자·팀 수 선택 → 결과 확인\n로그인: 추가 조건·AI 분석',
+    description: '모임의 ‘빠른 팀 편성’에서 팀 수와 참석자를 고르고 ‘팀 나누기’를 누르세요. 예를 들어 6명을 2팀으로 나누면 3명씩 편성돼요.',
   },
   {
     title: '편성 결과 저장하기',
-    description: '결과 확정하기 → 모임 → 이전 경기 기록',
+    description: '선수를 바꾸려면 서로 다른 팀의 두 명을 차례로 누르세요. ‘결과 확정하기’를 누르면 ‘이전 경기 기록’에서 명단을 다시 볼 수 있어요.',
   },
 ];
 
@@ -26,7 +26,7 @@ export default function UserGuide() {
     <div className="heading">
       <div className="eyebrow blue">HOW TO USE TEAM UP</div>
       <h2 id="guide-title">앱 사용 설명서</h2>
-      <p>모임 → 팀 편성 → 기록</p>
+      <p>모임장은 선수 명단을 준비하고, 초대받은 모임원은 내 정보를 등록해요.</p>
     </div>
     <ol className="guide-steps">
       {steps.map((step, index) => <li className="guide-step" key={step.title}>
@@ -34,6 +34,6 @@ export default function UserGuide() {
         <div><h3>{step.title}</h3><p>{step.description}</p></div>
       </li>)}
     </ol>
-    <div className="guide-note"><strong>게스트로 사용할 때</strong><p>이 브라우저에만 저장 · 초대·자연어 조건·AI 분석은 로그인 필요</p></div>
+    <div className="guide-note"><strong>게스트로 연습할 때</strong><p>모임과 경기 기록은 지금 쓰는 브라우저에만 저장돼요. 나중에 로그인해도 계정으로 옮겨지지 않아요.</p></div>
   </section>;
 }

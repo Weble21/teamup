@@ -1,0 +1,18 @@
+app = "teamup-hrwc-g-db"
+primary_region = "sin"
+
+[build]
+  image = "mysql:8.4"
+
+[env]
+  MYSQL_DATABASE = "teamup"
+  MYSQL_USER = "teamup"
+
+[mounts]
+  source = "teamup_mysql_data"
+  destination = "/var/lib/mysql"
+
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 1
+  memory = "512mb"
